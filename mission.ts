@@ -144,6 +144,7 @@ namespace PTKidsMission {
         // phase 2: stop on the next line
         while (true) {
             readSensors()
+            position()   // keep "which side the line was last seen" fresh for the line follower
             if (centerOnLine()) { PTKidsBITRobot.motorStop(); return true }
             PTKidsBITRobot.motorGo(l, -l)
             if (control.millis() - t > SPIN_TIMEOUT) return false
