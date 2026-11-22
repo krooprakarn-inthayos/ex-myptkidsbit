@@ -1,24 +1,89 @@
+# PTKidsBIT Mission — บล็อคนำทางสำหรับภารกิจส่งด่วน
 
-> Open this page at [https://krooprakarn-inthayos.github.io/ex-myptkidsbit/](https://krooprakarn-inthayos.github.io/ex-myptkidsbit/)
+Extension สำหรับหุ่น **PTKidsBIT** (micro:bit) ที่รวม **บล็อคเดิมทั้งหมด** ของ
+[pxt-PTKidsBIT-Robot](https://github.com/iBuilds/pxt-PTKidsBIT-Robot) v1.6.5 (โดย PTBOT)
+และเพิ่มหมวดใหม่ **"ภารกิจส่งด่วน"** ที่ให้หุ่นหาเส้นทางและวิ่งเองจากจุดหนึ่งไปอีกจุดหนึ่งบนสนามแข่งขัน PT KidsBiT ภารกิจส่งด่วน (240 × 120 ซม.)
 
-## Use as Extension
+## ติดตั้ง
 
-This repository can be added as an **extension** in MakeCode.
+1. อัปโหลดโฟลเดอร์นี้ขึ้น GitHub (เช่น `krooprakarn-inthayos/pxt-PTKidsBIT-Mission`)
+2. เปิด https://makecode.microbit.org → New Project → Extensions
+3. วาง URL ของ repo แล้วกดเพิ่ม
 
-* open [https://makecode.microbit.org/](https://makecode.microbit.org/)
-* click on **New Project**
-* click on **Extensions** under the gearwheel menu
-* search for **https://github.com/krooprakarn-inthayos/ex-myptkidsbit** and import
+> **ห้ามใส่ Extension `PTKidsBIT-Robot` ตัวเดิมในโปรเจกต์เดียวกัน** ชื่อคำสั่งจะชนกันและโปรเจกต์คอมไพล์ไม่ผ่าน ตัวนี้มีบล็อคเดิมครบแล้ว
 
-## Edit this project
+## จุดในสนาม (มุมมองหุ่นที่ START หันหน้าเข้าสนาม · ภาพคร่าว ๆ)
 
-To edit this repository in MakeCode.
+```
+        T1   T2
+   ช่องขาว (ซ้ายหุ่น)
+  UL ─────────── UR
+START ─ J1 ─ J2 ─ J3 ─ J4 ─┤ เหลือง
+  DL ─────────── DR
+   ช่องดำ (ขวาหุ่น)
+        B1   B2
+```
 
-* open [https://makecode.microbit.org/](https://makecode.microbit.org/)
-* click on **Import** then click on **Import URL**
-* paste **https://github.com/krooprakarn-inthayos/ex-myptkidsbit** and click import
+- U = แถวฝั่งซ้ายหุ่น (ฝั่งช่องขาว) · D = แถวฝั่งขวาหุ่น (ฝั่งช่องดำ)
+- T1/B1 อยู่ปลายเส้นแนวตั้งที่ J2 · T2/B2 อยู่ปลายเส้นที่ J3
+- ทีมซ้ายและทีมขวาใช้ชื่อจุดเดียวกัน เพราะช่องขาวอยู่ซ้ายหุ่นเสมอ
 
-#### Metadata (used for search, rendering)
+## บล็อคหมวด "ภารกิจส่งด่วน"
 
-* for PXT/microbit
-<script src="https://makecode.com/gh-pages-embed.js"></script><script>makeCodeRender("{{ site.makecode.home_url }}", "{{ site.github.owner_name }}/{{ site.github.repository_name }}");</script>
+| บล็อค | ใช้ทำอะไร |
+|---|---|
+| `ไปจาก [จุด] ถึง [จุด]` | ตั้งจุดเริ่มแล้ววิ่งไปจุดปลายทาง |
+| `ไปที่ [จุด]` | วิ่งจากตำแหน่งล่าสุดที่หุ่นจำไว้ |
+| `ตั้งตำแหน่งหุ่นที่ [จุด]` | บอกหุ่นว่าอยู่ไหน **ใช้ทุกครั้งหลัง RETRY: ตั้งที่ START** |
+| `ตำแหน่งปัจจุบัน` | เลขจุดที่หุ่นคิดว่าอยู่ (ไว้แสดงบนจอตอนทดสอบ) |
+| `ตั้งค่าการวิ่ง` | ความเร็ว (ต่ำสุด = ความเร็วฐานตอนอยู่กลางเส้น) และ KP/KD |
+| `ตั้งค่าการเลี้ยว` | ความเร็วหมุน · เวลาหมุนแบบไม่มองเส้น · เวลาเดินหน้าก่อนเลี้ยว |
+| `ตั้งค่ากลับหัว` | ความเร็วหมุน · เวลาหมุนแบบไม่มองเส้น · เวลาถอยก่อนหมุน |
+| `ตั้งค่าการเข้าจุดปลายทาง` | เวลาเดินต่อหลังหยุดที่จุดวาง Box / START, ช่องสี / Box เหลือง |
+
+ทิศของหุ่นเมื่อตั้งตำแหน่ง:
+- **START, J1–J4** → หันหน้าเข้ากลางสนาม
+- **Box, เหลือง, ช่องขาว, ช่องดำ** → หันหน้าเข้าปลายเส้น (หุ่นกลับหัวเองก่อนออกเดินทาง)
+
+ถ้าวิ่งแล้วหาเส้นไม่เจอเกินเวลา หุ่นจะ **หยุด ส่งเสียง และแสดงรูป ✗** ให้ขอ RETRY แล้วใช้ `ตั้งตำแหน่งหุ่นที่ START`
+
+## ตัวอย่าง: เที่ยวเก็บ Box UL
+
+```blocks
+PTKidsBITRobot.SensorCalibrate()
+PTKidsMission.setPosition(MissionPoint.START)
+input.onButtonPressed(Button.B, function () {
+    PTKidsBITRobot.servoWrite(Servo_Write.P12, 90)   // เปิดกริปเปอร์ (ปรับมุมตามหุ่นจริง)
+    PTKidsMission.goTo(MissionPoint.UL)
+    PTKidsBITRobot.servoWrite(Servo_Write.P12, 20)   // หนีบ
+    PTKidsMission.goTo(MissionPoint.START)
+    PTKidsBITRobot.servoWrite(Servo_Write.P12, 90)   // ปล่อย
+})
+```
+
+## ลำดับการจูนบนสนามจริง
+
+1. **คาลิเบรต** ด้วย `SensorCalibrate` (วางเซนเซอร์ทั้ง 6 ตัวบนช่องดำ แล้วกด A จากนั้นวางบนพื้นขาวแล้วกด A)
+   อ่านค่าจาก Serial แล้วใส่ใน `SETColorLine` จะได้ไม่ต้องคาลิเบรตใหม่ทุกครั้ง
+2. **การวิ่ง**: `ไปจาก START ถึง J4` ปรับ KP/KD จนวิ่งนิ่ง
+3. **การเลี้ยว**: `ไปจาก START ถึง UL` ถ้าเลี้ยวแล้วเลยเส้น ลดเวลาหมุนเร็ว ถ้าหมุนแล้วจอดผิดเส้น เพิ่มเวลาเดินหน้าก่อนเลี้ยว
+4. **กลับหัว**: `ไปจาก UL ถึง START` เวลาหมุนเร็วควรพาหุ่นหมุนได้ราว 120° (สองในสามของการกลับหัว) ก่อนเริ่มมองหาเส้น จะได้ไม่หยุดผิดที่กรอบ Box หรือเส้นหยุด
+5. **เข้าจุดปลายทาง**: ปรับเวลาเข้า Box ให้ Box อยู่กลางกริปเปอร์พอดี
+
+## ข้อจำกัด
+
+- ใช้ได้กับสนามภารกิจส่งด่วนเท่านั้น และไม่ข้ามช่องว่างที่ไม่มีเส้น
+- รองรับเส้นดำบนพื้นขาว
+- ค่าเวลาเริ่มต้นเป็นค่าประมาณ ต้องจูนกับหุ่นจริง
+
+## การแก้ไขจากโค้ดเดิม
+
+- `TurnLINE`: ใช้ค่าคาลิเบรตของเซนเซอร์ที่เลือกให้ถูกตัว (เดิมเลื่อนไป 1 ช่อง และ ADC4/ADC5 อ่านค่าผิด)
+
+## สำหรับผู้พัฒนา
+
+`./tests/run.sh` ทดสอบแผนที่และตัวหาเส้นทาง (ทุกคู่จุด 16 × 16) และตรวจชนิดข้อมูลของโค้ด
+
+## License
+
+MIT — โค้ดเดิม Copyright (c) 2020 PTBOT (ดู LICENSE)

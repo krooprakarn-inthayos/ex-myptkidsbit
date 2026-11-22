@@ -1,21 +1,26 @@
 {
-    "name": "Ex-myPTKidsBIT",
-    "description": "",
+    "name": "pxt-PTKidsBIT-Mission",
+    "version": "0.1.0",
+    "description": "PTKidsBIT Robot blocks + ภารกิจส่งด่วน navigation blocks (based on pxt-PTKidsBIT-Robot v1.6.5 by PTBOT)",
     "dependencies": {
         "core": "*",
         "radio": "*",
-        "microphone": "*"
+        "microphone": "*",
+        "ws2812b": "github:microsoft/pxt-ws2812b#v0.1.2"
     },
     "files": [
-        "main.blocks",
-        "main.ts",
-        "README.md"
+        "README.md",
+        "PTKidsBITRobot.ts",
+        "navmap.ts",
+        "navplan.ts",
+        "mission.ts"
     ],
     "testFiles": [
         "test.ts"
     ],
+    "public": true,
     "targetVersions": {
-        "target": "9.0.12",
+        "target": "8.0.18",
         "targetId": "microbit"
     },
     "supportedTargets": [
