@@ -157,15 +157,23 @@ namespace PTKidsMission {
         return spin(dir, turnSpeed, turnBlindMs)
     }
 
-    function uturn(kind: number): boolean {
-        let back = uturnBackMs
-        if (kind == MissionNav.K_YELLOW) back = arriveYellowMs
-        else if (kind == MissionNav.K_JUNCTION) back = 0
-        if (back > 0) {
+    /**
+     * reverse (sensors at the front) until they sit on a crossing / frame edge.
+     * ignoreMs: at the start, ignore a crossing the sensors may already be on (the box's small frame)
+     */
+    function backToCrossing(ignoreMs: number): boolean {
+        const t = control.millis()
+        while (true) {
+            readSensors()
+            if (isWide() && control.millis() - t >= ignoreMs) { PTKidsBITRobot.motorStop(); return true }
             PTKidsBITRobot.motorGo(-runMin, -runMin)
-            basic.pause(back)
-            PTKidsBITRobot.motorStop()
+            if (control.millis() - t > 3000) return false
         }
+    }
+
+    function uturn(kind: number): boolean {
+        // START / zone: come back to the frame edge first, then spin like on a crossing
+        if (kind == MissionNav.K_ZONE && !backToCrossing(0)) return false
         return spin(1, uturnSpeed, uturnBlindMs)
     }
 
@@ -197,15 +205,19 @@ namespace PTKidsMission {
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
+        let seenLine = false
+        let lostReads = 0
         const t = control.millis()
         while (true) {
             readSensors()
             const on = countOn()
+            if (centerOnLine()) seenLine = true
+            lostReads = on == 0 ? lostReads + 1 : 0
             if (on >= 5 && c < pass) {
                 c++
                 if (!leaveWide()) return false
-            } else if (on >= 5 || on == 0) {
-                // frame edge of the target square, or the end of the line
+            } else if (on >= 5 || (seenLine && lostReads >= 3)) {
+                // frame edge of the target square, or the line really ended
                 PTKidsBITRobot.motorStop()
                 break
             } else pdStep()
@@ -229,6 +241,7 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_FOLLOW) ok = follow(arg)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg)
+            else if (op == MissionNav.OP_BACK) ok = backToCrossing(uturnBackMs)
             if (!ok) return false
         }
         return true
@@ -305,9 +318,10 @@ namespace PTKidsMission {
     }
 
     /**
-     * ค่าหมุนกลับหัว 180°
+     * ค่าหมุนกลับหัว 180° และการถอยออกจาก Box
+     * backMs = ช่วงแรกของการถอยที่ไม่นับขอบกรอบ Box (กันหยุดผิดที่ขอบกรอบ)
      */
-    //% block="ตั้งค่ากลับหัว ความเร็ว $speed เวลาหมุนเร็ว $blindMs ms ถอยก่อนหมุน $backMs ms"
+    //% block="ตั้งค่ากลับหัว ความเร็ว $speed เวลาหมุนเร็ว $blindMs ms ถอยออกจาก Box ไม่นับขอบกรอบช่วงแรก $backMs ms"
     //% speed.defl=50 blindMs.defl=350 backMs.defl=150
     //% speed.min=0 speed.max=100
     //% group="ตั้งค่า" weight=40 inlineInputMode=inline

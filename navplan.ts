@@ -8,6 +8,7 @@
  *   3 FOLLOW arg = n (follow the line, stop on the n-th junction)
  *   4 TURN   arg = 0 left, 1 right (at the junction the robot is stopped on)
  *   5 ARRIVE arg = kind + 10 × junctions passed straight first
+ *   6 BACK   arg = 0 (reverse off a box / yellow until the sensors are on the nearest crossing)
  */
 namespace MissionNav {
     export const OP_UTURN = 1
@@ -15,6 +16,7 @@ namespace MissionNav {
     export const OP_FOLLOW = 3
     export const OP_TURN = 4
     export const OP_ARRIVE = 5
+    export const OP_BACK = 6
 
     // cost model (seconds): matches the route simulator's defaults
     const SPEED_CM_S = 25
@@ -45,19 +47,27 @@ namespace MissionNav {
         const done: boolean[] = []
         for (let i = 0; i < S4; i++) { dist.push(BIG); prev.push(-1); done.push(false) }
 
-        // start states: as placed, or after an initial U-turn
-        let forcedUturn = MissionNav.neighbor(start, heading) < 0
+        // start states
+        //  - box / yellow (facing the end): reverse onto the nearest crossing, still facing the box;
+        //    from there turn, or U-turn on the crossing — never drive back into the box
+        //  - START / zone facing in: U-turn on the frame edge
+        //  - junction: as placed, or U-turn on the crossing
+        const sk = MissionNav.kind(start)
+        let backFirst = false
+        let forcedUturn = false
         let s0 = start, h0 = heading
-        if (forcedUturn) {
-            if (start == MissionNav.Y) { s0 = MissionNav.ST }
-            h0 = (heading + 2) % 4
-            dist[s0 * 4 + h0] = 0
-        } else {
-            dist[start * 4 + heading] = 0
-            if (MissionNav.kind(start) == MissionNav.K_JUNCTION) {
-                // optional U-turn on a junction (spin 180° over the cross)
-                dist[start * 4 + (heading + 2) % 4] = COST_UTURN
+        if (MissionNav.neighbor(start, heading) < 0) {
+            if (sk == MissionNav.K_BOX || sk == MissionNav.K_YELLOW) {
+                backFirst = true
+                s0 = MissionNav.neighbor(start, (heading + 2) % 4)
+            } else {
+                forcedUturn = true
+                h0 = (heading + 2) % 4
             }
+        }
+        dist[s0 * 4 + h0] = 0
+        if (backFirst || sk == MissionNav.K_JUNCTION) {
+            dist[s0 * 4 + (h0 + 2) % 4] = COST_UTURN
         }
 
         let best = -1
@@ -73,6 +83,7 @@ namespace MissionNav {
                 const m = MissionNav.neighbor(n, oh)
                 if (m < 0) continue
                 if (m == MissionNav.Y && goal != MissionNav.Y) continue
+                if (m == start && backFirst) continue // never back into the box we just left
                 let c = du + MissionNav.edgeLength(n, m) / SPEED_CM_S
                 if (oh != h) c += COST_TURN
                 else if (MissionNav.isJunction(n) && n != s0) c += COST_CROSS
@@ -87,10 +98,17 @@ namespace MissionNav {
         let cur = best
         while (cur >= 0) { path.insertAt(0, cur); cur = prev[cur] }
         const first = path[0]
-        const usedUturn = forcedUturn || Math.idiv(first, 4) == start && first % 4 != heading
-
-        if (usedUturn) { acts.push(OP_UTURN); acts.push(MissionNav.kind(start)) }
-        else if (MissionNav.kind(start) == MissionNav.K_ZONE) { acts.push(OP_EXIT); acts.push(0) }
+        const uturnOnCrossing = first % 4 != h0
+        if (backFirst) {
+            acts.push(OP_BACK); acts.push(0)
+            if (uturnOnCrossing) { acts.push(OP_UTURN); acts.push(MissionNav.K_JUNCTION) }
+        } else if (forcedUturn) {
+            acts.push(OP_UTURN); acts.push(sk)
+        } else if (uturnOnCrossing) {
+            acts.push(OP_UTURN); acts.push(MissionNav.K_JUNCTION)
+        } else if (sk == MissionNav.K_ZONE) {
+            acts.push(OP_EXIT); acts.push(0)
+        }
 
         const k = path.length - 1
         const H = (i: number): number => path[i] % 4
