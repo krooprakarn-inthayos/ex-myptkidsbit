@@ -48,6 +48,7 @@ let Servo_8_Degree = 0
 let Servo_12_Degree = 0
 let distance = 0
 let timer = 0
+let Calibrating = false   // PTKidsBIT Mission: true while SensorCalibrate runs
 
 enum Motor_Write {
     //% block="Left"
@@ -1729,6 +1730,7 @@ namespace PTKidsBITRobot {
      */
     //% block="SensorCalibrate $adc_pin"
     export function SensorCalibrate(): void {
+        Calibrating = true
         serial.writeLine("")
         let ADC_PIN = [
             ADC_Read.ADC0,
@@ -1846,5 +1848,6 @@ namespace PTKidsBITRobot {
             sensor_value += " " + Math.round(Color_Background_All[i])
         }
         serial.writeLine("" + sensor_value)
+        Calibrating = false
     }
 }

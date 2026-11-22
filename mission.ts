@@ -85,6 +85,12 @@ namespace PTKidsMission {
         return Color_Line_All.length >= 6 && Color_Background_All.length >= 6
     }
 
+    function failNotCalibrated(): void {
+        PTKidsBITRobot.motorStop()
+        music.playTone(262, 200)
+        basic.showIcon(IconNames.Confused)
+    }
+
     function fail(): void {
         PTKidsBITRobot.motorStop()
         music.playTone(262, 400)
@@ -246,7 +252,8 @@ namespace PTKidsMission {
     //% block="ไปที่ $to"
     //% group="นำทาง" weight=90
     export function goTo(to: MissionPoint): void {
-        if (!calibrated()) { fail(); return }
+        if (Calibrating) return   // a button press during SensorCalibrate must not drive the robot
+        if (!calibrated()) { failNotCalibrated(); return }
         const goal = MissionNav.pointNode(to)
         const acts = MissionNav.plan(curNode, curHeading, goal)
         if (acts.length == 0) return
