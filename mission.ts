@@ -1,10 +1,18 @@
+/** สีของกล่อง */
+enum BoxColor {
+    //% block="ดำ"
+    Black = 0,
+    //% block="ขาว"
+    White = 1
+}
+
 /**
  * บล็อคหมวด "ภารกิจส่งด่วน" — นำทางอัตโนมัติบนสนามภารกิจส่งด่วน
  * Uses the original extension's sensors/motors (ADCRead, motorGo, motorStop)
  * and its calibration arrays (Color_Line_All / Color_Background_All).
  */
 //% color="#E67E22" icon="" block="ภารกิจส่งด่วน" weight=95
-//% groups='["นำทาง", "ตั้งค่า"]'
+//% groups='["ภารกิจอัตโนมัติ", "นำทาง", "ตั้งค่า"]'
 namespace PTKidsMission {
     // ---- where the robot thinks it is ----
     let curNode = MissionNav.S
@@ -377,16 +385,23 @@ namespace PTKidsMission {
     //% block="ไปที่ $to"
     //% group="นำทาง" weight=90
     export function goTo(to: MissionPoint): void {
-        if (Calibrating) return   // a button press during SensorCalibrate must not drive the robot
-        if (!calibrated()) { failNotCalibrated(); return }
+        goToOk(to)
+    }
+
+    function goToOk(to: MissionPoint): boolean {
+        if (Calibrating) return false   // a button press during SensorCalibrate must not drive the robot
+        if (!calibrated()) { failNotCalibrated(); return false }
         const goal = MissionNav.pointNode(to)
         const acts = MissionNav.plan(curNode, curHeading, goal)
-        if (acts.length == 0) return
+        if (acts.length == 0) return curNode == goal
         goalNode = goal
         if (run(acts)) {
             curNode = goal
             curHeading = MissionNav.finalHeading()
-        } else fail()
+            return true
+        }
+        fail()
+        return false
     }
 
     /**
@@ -492,11 +507,12 @@ namespace PTKidsMission {
     //% block="ตั้งค่ากริปเปอร์ แขน $arm ยกขึ้น $up ลดลง $down มือจับ $grip อ้า $open หนีบ $close"
     //% arm.defl=Servo_Write.P8 up.defl=90 down.defl=0 grip.defl=Servo_Write.P12 open.defl=180 close.defl=0
     //% up.min=0 up.max=180 down.min=0 down.max=180 open.min=0 open.max=180 close.min=0 close.max=180
-    //% group="ตั้งค่า" weight=10 inlineInputMode=inline blockHidden=true
+    //% group="ภารกิจอัตโนมัติ" weight=10 inlineInputMode=inline
+    //% up.min=0 up.max=180 down.min=0 down.max=180 open.min=0 open.max=180 close.min=0 close.max=180
+    //% arm.defl=Servo_Write.P8 grip.defl=Servo_Write.P12 up.defl=90 down.defl=0 open.defl=180 close.defl=0
     export function setGripper(arm: Servo_Write, up: number, down: number, grip: Servo_Write, open: number, close: number): void {
         armServo = arm; armUp = up; armDown = down
         gripServo = grip; gripOpen = open; gripClose = close
-        gripOn = true
     }
 
     /**
@@ -537,5 +553,213 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=2
     export function setShowStopReason(on: boolean): void {
         showStopReason = on
+    }
+
+    // ================= ภารกิจอัตโนมัติ (auto mission) =================
+
+    // box index i: 0 UL, 1 DL, 2 T1, 3 B1, 4 UR, 5 DR, 6 T2, 7 B2
+    const BOX_POINT = [MissionPoint.UL, MissionPoint.DL, MissionPoint.T1, MissionPoint.B1, MissionPoint.UR, MissionPoint.DR, MissionPoint.T2, MissionPoint.B2]
+    // LED of each box spot on the 5x5 screen (top row = white-zone side of the field)
+    const BOX_LED_X = [0, 0, 1, 1, 4, 4, 3, 3]
+    const BOX_LED_Y = [1, 3, 0, 4, 1, 3, 0, 4]
+    // button input goes round the screen clockwise: UL, T1, T2, UR, DR, B2, B1, DL
+    const INPUT_ORDER = [0, 2, 6, 4, 5, 7, 3, 1]
+    let boxColor = [-1, -1, -1, -1, -1, -1, -1, -1]
+    let doneMask = 0
+    let testDrive: (p: number) => boolean = (p: number) => true
+    let useTestDrive = false
+
+    function boxIndex(spot: MissionPoint): number { return BOX_POINT.indexOf(spot) }
+
+    function drive(p: MissionPoint): boolean {
+        if (useTestDrive) return testDrive(p)
+        return goToOk(p)
+    }
+
+    function servo(s: Servo_Write, d: number): void { PTKidsBITRobot.servoWrite(s, d) }
+
+    /** arm down + gripper open, ready to drive onto a box */
+    function gripReady(): void {
+        servo(armServo, armDown)
+        servo(gripServo, gripOpen)
+        basic.pause(SERVO_MS)
+    }
+    /** close on the box and lift it off the floor */
+    function gripTake(): void {
+        servo(gripServo, gripClose)
+        basic.pause(SERVO_MS)
+        servo(armServo, armUp)
+        basic.pause(SERVO_MS)
+    }
+    /** put the box down, let go and lift the empty gripper clear */
+    function gripDrop(): void {
+        servo(armServo, armDown)
+        basic.pause(SERVO_MS)
+        servo(gripServo, gripOpen)
+        basic.pause(SERVO_MS)
+        servo(armServo, armUp)
+        basic.pause(SERVO_MS)
+    }
+
+    function colorsReady(): boolean {
+        let black = 0, white = 0
+        for (let i = 0; i < 8; i++) {
+            if (boxColor[i] == 0) black++
+            else if (boxColor[i] == 1) white++
+        }
+        return black == 4 && white == 4
+    }
+
+    function showColors(): void {
+        basic.clearScreen()
+        for (let i = 0; i < 8; i++) if (boxColor[i] == 0) led.plot(BOX_LED_X[i], BOX_LED_Y[i])
+    }
+
+    /** 0 = A, 1 = B; waits until the button is released */
+    function waitButton(blinkX: number, blinkY: number): number {
+        let on = false
+        let t = control.millis()
+        while (true) {
+            if (input.buttonIsPressed(Button.A)) {
+                while (input.buttonIsPressed(Button.A)) basic.pause(20)
+                return 0
+            }
+            if (input.buttonIsPressed(Button.B)) {
+                while (input.buttonIsPressed(Button.B)) basic.pause(20)
+                return 1
+            }
+            if (control.millis() - t >= 200) {
+                on = !on
+                if (on) led.plot(blinkX, blinkY)
+                else led.unplot(blinkX, blinkY)
+                t = control.millis()
+            }
+            basic.pause(20)
+        }
+    }
+
+    /**
+     * ใส่สีกล่องด้วยปุ่มบนหุ่น ไฟกะพริบ = ช่องที่กำลังถาม (แถวบน = ฝั่งช่องขาว)
+     * กด A = กล่องดำ, กด B = กล่องขาว วนตามเข็มนาฬิกา 8 ช่อง แล้วแสดงสรุป (ไฟติด = ดำ)
+     * ถ้าไม่ใช่ดำ 4 ขาว 4 จะแสดง X แล้วให้ใส่ใหม่
+     */
+    //% block="ใส่สีกล่องด้วยปุ่ม A=ดำ B=ขาว"
+    //% group="ภารกิจอัตโนมัติ" weight=100
+    export function inputBoxColors(): void {
+        while (true) {
+            for (let i = 0; i < 8; i++) boxColor[i] = -1
+            basic.clearScreen()
+            for (let k = 0; k < 8; k++) {
+                const i = INPUT_ORDER[k]
+                boxColor[i] = waitButton(BOX_LED_X[i], BOX_LED_Y[i])
+                if (boxColor[i] == 0) led.plot(BOX_LED_X[i], BOX_LED_Y[i])
+                else led.unplot(BOX_LED_X[i], BOX_LED_Y[i])
+                music.playTone(boxColor[i] == 0 ? 523 : 784, 80)
+            }
+            if (colorsReady()) {
+                showColors()
+                basic.pause(1500)
+                return
+            }
+            basic.showIcon(IconNames.No)
+            music.playTone(262, 300)
+            basic.pause(800)
+        }
+    }
+
+    /**
+     * กำหนดสีกล่องของจุดหนึ่งด้วยบล็อค (ใช้แทนการกดปุ่มได้)
+     */
+    //% block="ตั้งสีกล่องที่ $spot เป็น $color"
+    //% spot.defl=MissionPoint.UL
+    //% group="ภารกิจอัตโนมัติ" weight=95
+    export function setBoxColor(spot: MissionPoint, color: BoxColor): void {
+        const i = boxIndex(spot)
+        if (i >= 0) boxColor[i] = color
+    }
+
+    /**
+     * เริ่มภารกิจอัตโนมัติจาก START: หุ่นคำนวณลำดับที่เร็วที่สุดเอง
+     * หยิบกล่อง → ส่งเข้าช่องสีเดียวกัน ครบ 8 กล่อง แล้วนำกล่องเหลืองกลับ START
+     * ถ้าพลาดกลางทาง หุ่นหยุด: RETRY วางหุ่นที่ START แล้วเรียกบล็อคนี้อีกครั้ง หุ่นทำต่อเฉพาะกล่องที่ยังไม่ส่ง
+     */
+    //% block="เริ่มภารกิจอัตโนมัติ"
+    //% group="ภารกิจอัตโนมัติ" weight=90
+    export function startAutoMission(): void {
+        if (Calibrating) return
+        if (!colorsReady()) {
+            basic.showIcon(IconNames.No)
+            music.playTone(262, 300)
+            return
+        }
+        setPosition(MissionPoint.START)
+        const colors = boxColor.slice()
+        const order = MissionNav.bestOrder(colors, doneMask)
+        for (let k = 0; k < order.length; k++) {
+            const i = order[k]
+            MissionNav.setPresentMask(255 & ~doneMask)
+            gripReady()
+            if (!drive(BOX_POINT[i])) { MissionNav.setPresentMask(0); return }
+            gripTake()
+            MissionNav.setPresentMask(255 & ~doneMask & ~(1 << i))
+            if (!drive(colors[i] == 1 ? MissionPoint.WhiteZone : MissionPoint.BlackZone)) { MissionNav.setPresentMask(0); return }
+            gripDrop()
+            doneMask |= 1 << i
+        }
+        MissionNav.setPresentMask(0)
+        gripReady()
+        if (!drive(MissionPoint.Yellow)) return
+        gripTake()
+        if (!drive(MissionPoint.START)) return
+        gripDrop()
+        basic.showIcon(IconNames.Yes)
+        music.playTone(988, 400)
+    }
+
+    /**
+     * เริ่มภารกิจใหม่ทั้งหมด (ลืมว่ากล่องไหนส่งแล้ว) สีกล่องยังจำไว้
+     */
+    //% block="เริ่มภารกิจอัตโนมัติใหม่ทั้งหมด"
+    //% group="ภารกิจอัตโนมัติ" weight=80
+    export function resetAutoMission(): void {
+        doneMask = 0
+    }
+
+    /**
+     * บอกหุ่นว่ากล่องที่จุดนี้ส่งแล้ว / ไม่ต้องเก็บ
+     */
+    //% block="ข้ามกล่องที่ $spot"
+    //% spot.defl=MissionPoint.UL
+    //% group="ภารกิจอัตโนมัติ" weight=70
+    export function skipBox(spot: MissionPoint): void {
+        const i = boxIndex(spot)
+        if (i >= 0) doneMask |= 1 << i
+    }
+
+    /**
+     * จำนวนกล่องที่ส่งเข้าช่องแล้ว
+     */
+    //% block="จำนวนกล่องที่ส่งแล้ว"
+    //% group="ภารกิจอัตโนมัติ" weight=60
+    export function boxesDone(): number {
+        let n = 0
+        for (let i = 0; i < 8; i++) if (doneMask & (1 << i)) n++
+        return n
+    }
+
+    //% blockHidden=true
+    export function clearBoxColors(): void {
+        for (let i = 0; i < 8; i++) boxColor[i] = -1
+    }
+
+    //% blockHidden=true
+    export function setDriveHookForTest(f: (p: number) => boolean): void {
+        testDrive = f
+        useTestDrive = true
+    }
+
+    //% blockHidden=true
+    export function clearDriveHookForTest(): void {
+        useTestDrive = false
     }
 }

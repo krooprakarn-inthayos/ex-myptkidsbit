@@ -27,6 +27,25 @@ namespace MissionNav {
     const BIG = 1000000
 
     let lastHeading = 0
+    let lastCostVal = 0
+    // boxes still on the field (bit i = UL, DL, T1, B1, UR, DR, T2, B2): never turn on a crossing next to one
+    let presentMask = 0
+
+    export function setPresentMask(mask: number): void { presentMask = mask }
+    export function getPresentMask(): number { return presentMask }
+
+    /** estimated seconds of the last planned route */
+    export function lastCost(): number { return lastCostVal }
+
+    /** true when `n` is the crossing right next to a box that is still on the field */
+    function nextToPresentBox(n: number): boolean {
+        if (presentMask == 0) return false
+        for (let h = 0; h < 4; h++) {
+            const m = MissionNav.neighbor(n, h)
+            if (m >= MissionNav.UL && m <= MissionNav.B2 && (presentMask & (1 << (m - MissionNav.UL))) != 0) return true
+        }
+        return false
+    }
 
     /** heading the robot faces after the last planned route */
     export function finalHeading(): number {
@@ -38,8 +57,22 @@ namespace MissionNav {
      * @param start start node, @param heading heading the robot faces at start, @param goal goal node
      */
     export function plan(start: number, heading: number, goal: number): number[] {
+        const acts = planOnce(start, heading, goal)
+        if (acts.length == 0 && start != goal && presentMask != 0) {
+            // no route avoids every present box: plan without that rule rather than not at all
+            const saved = presentMask
+            presentMask = 0
+            const again = planOnce(start, heading, goal)
+            presentMask = saved
+            return again
+        }
+        return acts
+    }
+
+    function planOnce(start: number, heading: number, goal: number): number[] {
         const acts: number[] = []
         lastHeading = heading
+        lastCostVal = 0
         if (start == goal) return acts
 
         const S4 = MissionNav.NODE_COUNT * 4
@@ -67,7 +100,7 @@ namespace MissionNav {
             }
         }
         dist[s0 * 4 + h0] = 0
-        if (backFirst || sk == MissionNav.K_JUNCTION) {
+        if ((backFirst || sk == MissionNav.K_JUNCTION) && !nextToPresentBox(s0)) {
             dist[s0 * 4 + (h0 + 2) % 4] = COST_UTURN
         }
 
@@ -87,6 +120,8 @@ namespace MissionNav {
                 if (m == start && backFirst) continue // never back into the box we just left
                 // enter a box straight: never turn on the crossing right next to it (the body sweeps the box)
                 if (m == goal && MissionNav.kind(goal) == MissionNav.K_BOX && oh != h) continue
+                // and never turn on a crossing next to any other box still on the field
+                if (oh != h && nextToPresentBox(n)) continue
                 let c = du + MissionNav.edgeLength(n, m) / SPEED_CM_S
                 if (oh != h) c += COST_TURN
                 else if (MissionNav.isJunction(n) && n != s0) c += COST_CROSS
@@ -95,6 +130,7 @@ namespace MissionNav {
             }
         }
         if (best < 0) return acts
+        lastCostVal = dist[best]
 
         // rebuild state path
         const path: number[] = []
