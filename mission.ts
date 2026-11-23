@@ -166,7 +166,7 @@ namespace PTKidsMission {
                 if (!leaveWide()) return false
                 clear = leftOnLine()
             } else {
-                clear = on >= 1 && on <= 3 ? clear + 1 : on == 0 ? clear : 0
+                if (on >= 1 && on <= 3) clear++   // only a counted crossing resets it
                 pdStep()
             }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
@@ -304,7 +304,7 @@ namespace PTKidsMission {
             if (centerOnLine()) seenLine = true
             lostReads = on == 0 ? lostReads + 1 : 0
             const ready = clear >= CLEAR_READS
-            clear = on >= 1 && on <= 3 ? clear + 1 : on == 0 ? clear : 0
+            if (on >= 1 && on <= 3) clear++   // only a counted crossing resets it
             // into a box: slow down from the second-last crossing; after the last one the small
             // box frame (≥ 4 sensors) or the approach timer ends the run
             const slowRun = toBox && c >= pass - 1
