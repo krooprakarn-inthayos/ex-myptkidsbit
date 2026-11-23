@@ -1,6 +1,6 @@
 {
     "name": "pxt-PTKidsBIT-Mission",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "description": "PTKidsBIT Robot blocks + ภารกิจส่งด่วน navigation blocks (based on pxt-PTKidsBIT-Robot v1.6.5 by PTBOT)",
     "dependencies": {
         "core": "*",
