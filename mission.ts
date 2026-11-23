@@ -28,6 +28,7 @@ namespace PTKidsMission {
     let arriveYellowMs = 250
     let approachSpeed = 30    // last segment into a box (from its second-last crossing)
     let approachStopMs = 0    // > 0: stop this long after the last crossing before a box
+    let showStopReason = false
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
@@ -285,19 +286,35 @@ namespace PTKidsMission {
                 c++
                 if (!leaveWideAt(slowRun ? slow : runMin)) return false
                 if (c >= pass) tLast = control.millis()
-            } else if (on >= 5 || (boxRun && on >= 4) || (seenLine && lostReads >= 3)
-                || (boxRun && approachStopMs > 0 && control.millis() - tLast >= approachStopMs)) {
-                // frame edge of the target square, the line really ended, or the approach time is up
-                PTKidsBITRobot.motorStop()
-                break
-            } else if (slowRun) pdStepAt(slow, runMax)
-            else pdStep()
+            } else {
+                // why we stop: 0 frame edge, 1 end of the line, 2 approach timer (only after the last crossing:
+                // there is no line end between crossings, a lost line there is just a wobble)
+                const pastLast = c >= pass
+                let why = -1
+                if (on >= 5 || (boxRun && on >= 4)) why = 0
+                else if (pastLast && seenLine && lostReads >= 3) why = 1
+                else if (boxRun && approachStopMs > 0 && control.millis() - tLast >= approachStopMs) why = 2
+                if (why >= 0) {
+                    PTKidsBITRobot.motorStop()
+                    showWhy(why)
+                    break
+                }
+                if (slowRun) pdStepAt(slow, runMax)
+                else pdStep()
+            }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
         let ms = arriveBoxMs
         if (kd == MissionNav.K_ZONE) ms = goalNode == MissionNav.S ? arriveStartMs : arriveZoneMs
         nudge(ms)
         return true
+    }
+
+    /** debug: light one LED in the top row — left = frame edge, middle = end of line, right = timer */
+    function showWhy(why: number): void {
+        if (!showStopReason) return
+        basic.clearScreen()
+        led.plot(why * 2, 0)
     }
 
     /** drive forward ms (> 0) or back -ms (< 0) at the base speed, then stop */
@@ -510,5 +527,15 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=27
     export function setApproachStop(ms: number): void {
         approachStopMs = ms
+    }
+
+    /**
+     * แสดงเหตุผลที่หุ่นหยุดตอนถึงปลายทาง (ไฟแถวบนสุด): ซ้าย = เจอขอบกรอบ, กลาง = สุดปลายเส้น, ขวา = หมดเวลาเข้า Box
+     */
+    //% block="แสดงเหตุผลการหยุด $on"
+    //% on.defl=true
+    //% group="ตั้งค่า" weight=2
+    export function setShowStopReason(on: boolean): void {
+        showStopReason = on
     }
 }
