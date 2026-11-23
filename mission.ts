@@ -249,13 +249,17 @@ namespace PTKidsMission {
         const t = control.millis()
         const v = Math.min(runMin, approachSpeed)   // reverse slowly: easier to keep the line
         let lineReads = 0
+        let tLine = t
         prevError = 0
         while (true) {
             readSensors()
             const on = countOn()
             // the plain line seen at least 3 times in total (a short drift off it does not reset this)
-            if (on >= 1 && on <= 3) lineReads++
-            if (on >= 5 && lineReads >= 3) { PTKidsBITRobot.motorStop(); return true }
+            if (on >= 1 && on <= 3) { lineReads++; tLine = control.millis() }
+            // the crossing in front of the zone: 4 sensors are enough (reversing at a slight angle)
+            if (on >= 4 && lineReads >= 3) { PTKidsBITRobot.motorStop(); return true }
+            // line lost after it was found: the crossing was missed, stop before running far off
+            if (on == 0 && lineReads >= 3 && control.millis() - tLine > 300) { PTKidsBITRobot.motorStop(); return false }
             if (on >= 1 && on <= 3) {
                 // steer while reversing: same turn direction as forward following, half the gain
                 let pd = runKP * 0.5 * (position() - 1500)
