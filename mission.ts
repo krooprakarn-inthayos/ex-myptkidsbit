@@ -37,6 +37,7 @@ namespace PTKidsMission {
     let approachSpeed = 30    // last segment into a box (from its second-last crossing)
     let approachStopMs = 0    // > 0: stop this long after the last crossing before a box
     let showStopReason = false
+    let boxStopAtCrossing = false   // stop on the crossing right before a box (gripper reaches the box from there)
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
@@ -289,6 +290,12 @@ namespace PTKidsMission {
         }
         const toBox = kd == MissionNav.K_BOX
         const slow = Math.min(approachSpeed, runMin)
+        if (toBox && boxStopAtCrossing && pass == 0) {
+            // already standing on the crossing right before the box
+            PTKidsBITRobot.motorStop()
+            nudge(arriveBoxMs)
+            return true
+        }
         // into a box with nothing to pass: slow from the start
         if (!leaveWideAt(toBox && pass == 0 ? slow : runMin)) return false
         prevError = 0
@@ -311,6 +318,12 @@ namespace PTKidsMission {
             const boxRun = toBox && c >= pass
             if (on >= 5 && c < pass && ready) {
                 c++
+                if (toBox && boxStopAtCrossing && c >= pass) {
+                    PTKidsBITRobot.motorStop()
+                    showWhy(0)
+                    nudge(arriveBoxMs)
+                    return true
+                }
                 if (!leaveWideAt(slowRun ? slow : runMin)) return false
                 clear = leftOnLine()
                 if (c >= pass) tLast = control.millis()
@@ -392,6 +405,7 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_FOLLOW) ok = follow(arg)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg)
+            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) nudge(-arriveBoxMs)
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) return false
             if (i == armAt) {
@@ -579,6 +593,18 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=27
     export function setApproachStop(ms: number): void {
         approachStopMs = ms
+    }
+
+    /**
+     * หยุดที่แยกสุดท้ายก่อนถึง Box แทนการวิ่งไปหาขอบกรอบ Box
+     * ใช้เมื่อกริปเปอร์ยื่นไปข้างหน้าไกล (วิ่งถึงขอบกรอบแล้วกริปเปอร์ชนกล่อง)
+     * ปรับระยะต่อด้วย "ตั้งค่าการเข้าจุดปลายทาง Box … ms" (บวก = เดินหน้าต่อ, ลบ = ถอย)
+     */
+    //% block="หยุดที่แยกก่อนถึง Box $on"
+    //% on.defl=true
+    //% group="ตั้งค่า" weight=28
+    export function setBoxStopAtCrossing(on: boolean): void {
+        boxStopAtCrossing = on
     }
 
     /**
