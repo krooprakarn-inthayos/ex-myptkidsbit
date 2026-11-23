@@ -48,10 +48,14 @@ namespace PTKidsMission {
     let gripOpen = 180
     let gripClose = 0
     const SERVO_MS = 300
+    let lowerArmBeforeZone = true   // lower the arm on the crossing before the white/black zone
 
     const FOLLOW_TIMEOUT = 8000
     const SPIN_TIMEOUT = 3000
     const ON = 500
+    // after leaving a crossing, the next crossing / frame edge only counts once the robot has seen
+    // a normal line (1–3 sensors) this many reads in a row: a wobble back onto the same crossing is not a new one
+    const CLEAR_READS = 2
 
     // ---- sensor layer: one read of all 6 channels per loop ----
     const vals = [0, 0, 0, 0, 0, 0]
@@ -140,19 +144,31 @@ namespace PTKidsMission {
         }
     }
 
+    /** after leaveWide: 1 if the read it stopped on was already a normal line, else 0 */
+    function leftOnLine(): number {
+        const on = countOn()
+        return on >= 1 && on <= 3 ? 1 : 0
+    }
+
     /** follow the line and stop on the n-th crossing */
     function follow(n: number): boolean {
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
+        let clear = CLEAR_READS   // armed at the start; only a crossing just counted disarms it
         const t = control.millis()
         while (true) {
             readSensors()
-            if (isWide()) {
+            const on = countOn()
+            if (isWide() && clear >= CLEAR_READS) {
                 c++
                 if (c >= n) { PTKidsBITRobot.motorStop(); return true }
                 if (!leaveWide()) return false
-            } else pdStep()
+                clear = leftOnLine()
+            } else {
+                clear = on >= 1 && on <= 3 ? clear + 1 : on == 0 ? clear : 0
+                pdStep()
+            }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
     }
@@ -281,25 +297,29 @@ namespace PTKidsMission {
         let lostReads = 0
         const t = control.millis()
         let tLast = t        // when the robot left the last crossing before the box
+        let clear = CLEAR_READS   // armed at the start; only a crossing just counted disarms it
         while (true) {
             readSensors()
             const on = countOn()
             if (centerOnLine()) seenLine = true
             lostReads = on == 0 ? lostReads + 1 : 0
+            const ready = clear >= CLEAR_READS
+            clear = on >= 1 && on <= 3 ? clear + 1 : on == 0 ? clear : 0
             // into a box: slow down from the second-last crossing; after the last one the small
             // box frame (≥ 4 sensors) or the approach timer ends the run
             const slowRun = toBox && c >= pass - 1
             const boxRun = toBox && c >= pass
-            if (on >= 5 && c < pass) {
+            if (on >= 5 && c < pass && ready) {
                 c++
                 if (!leaveWideAt(slowRun ? slow : runMin)) return false
+                clear = leftOnLine()
                 if (c >= pass) tLast = control.millis()
             } else {
                 // why we stop: 0 frame edge, 1 end of the line, 2 approach timer (only after the last crossing:
                 // there is no line end between crossings, a lost line there is just a wobble)
                 const pastLast = c >= pass
                 let why = -1
-                if (on >= 5 || (boxRun && on >= 4)) why = 0
+                if (ready && (on >= 5 || (boxRun && on >= 4))) why = 0
                 else if (pastLast && seenLine && lostReads >= 3) why = 1
                 else if (boxRun && approachStopMs > 0 && control.millis() - tLast >= approachStopMs) why = 2
                 if (why >= 0) {
@@ -350,7 +370,18 @@ namespace PTKidsMission {
         return ok
     }
 
+    /** index of the last FOLLOW before arriving at the white/black zone (-1: none / other goal) */
+    function lastFollowBeforeZone(acts: number[]): number {
+        const n = acts.length
+        if (!lowerArmBeforeZone || n < 2) return -1
+        if (acts[n - 2] != MissionNav.OP_ARRIVE || acts[n - 1] % 10 != MissionNav.K_ZONE) return -1
+        if (goalNode != MissionNav.WZ && goalNode != MissionNav.BZ) return -1
+        for (let i = n - 4; i >= 0; i -= 2) if (acts[i] == MissionNav.OP_FOLLOW) return i
+        return -1
+    }
+
     function run(acts: number[]): boolean {
+        const armAt = lastFollowBeforeZone(acts)
         for (let i = 0; i < acts.length; i += 2) {
             const op = acts[i], arg = acts[i + 1]
             let ok = true
@@ -363,6 +394,11 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg)
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) return false
+            if (i == armAt) {
+                // stopped on the crossing just before the colour zone: lower the box now
+                PTKidsBITRobot.servoWrite(armServo, armDown)
+                basic.pause(SERVO_MS)
+            }
         }
         return true
     }
@@ -593,8 +629,8 @@ namespace PTKidsMission {
     }
     /** put the box down, let go and lift the empty gripper clear */
     function gripDrop(): void {
-        servo(armServo, armDown)
-        basic.pause(SERVO_MS)
+        servo(armServo, armDown)                       // already down when lowered on the last crossing
+        if (!lowerArmBeforeZone) basic.pause(SERVO_MS)
         servo(gripServo, gripOpen)
         basic.pause(SERVO_MS)
         servo(armServo, armUp)
@@ -745,6 +781,17 @@ namespace PTKidsMission {
         let n = 0
         for (let i = 0; i < 8; i++) if (doneMask & (1 << i)) n++
         return n
+    }
+
+    /**
+     * ลดแขนลงตอนหุ่นหยุดที่แยกสุดท้ายก่อนเข้าช่องขาว/ช่องดำ (เปิดอยู่เป็นค่าเริ่มต้น)
+     * ถึงช่องแล้วอ้ามือวางกล่องได้ทันที
+     */
+    //% block="ลดแขนที่แยกก่อนถึงช่องขาว/ช่องดำ $on"
+    //% on.defl=true
+    //% group="ภารกิจอัตโนมัติ" weight=8
+    export function setLowerArmBeforeZone(on: boolean): void {
+        lowerArmBeforeZone = on
     }
 
     //% blockHidden=true
