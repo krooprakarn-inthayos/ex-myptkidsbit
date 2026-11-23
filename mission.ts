@@ -22,8 +22,12 @@ namespace PTKidsMission {
     let uturnBlindMs = 350
     let uturnBackMs = 150
     let arriveBoxMs = 0
-    let arriveZoneMs = 300
+    let arriveStartMs = 300   // START: drive fully into the frame
+    let arriveZoneMs = 0      // white / black zone: stop at the frame edge
+    let goalNode = -1
     let arriveYellowMs = 250
+    let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
+    let sideFwdMs = 100       // drive on after a side sensor sees the crossing
 
     const FOLLOW_TIMEOUT = 8000
     const SPIN_TIMEOUT = 3000
@@ -151,10 +155,30 @@ namespace PTKidsMission {
         }
     }
 
+    function sideCalibrated(): boolean {
+        return Side_Line.length >= 2 && Side_Ground.length >= 2
+    }
+
+    /** true when either side sensor (ADC6 left, ADC7 right) sees black */
+    function sideOnLine(): boolean {
+        const l = pins.map(PTKidsBITRobot.ADCRead(ADC_Read.ADC6), Side_Line[0], Side_Ground[0], 1000, 0)
+        const r = pins.map(PTKidsBITRobot.ADCRead(ADC_Read.ADC7), Side_Line[1], Side_Ground[1], 1000, 0)
+        return l > ON || r > ON
+    }
+
     function turn(dir: number): boolean {
-        PTKidsBITRobot.motorGo(runMin, runMin)
-        basic.pause(turnFwdMs)
-        PTKidsBITRobot.motorStop()
+        if (sideTurn && sideCalibrated()) {
+            // drive on until a side sensor reaches the crossing, then a short fixed distance to the wheels
+            const t = control.millis()
+            while (!sideOnLine()) {
+                PTKidsBITRobot.motorGo(runMin, runMin)
+                if (control.millis() - t > 1000) break   // missed it: turn from here rather than run away
+            }
+            PTKidsBITRobot.motorStop()
+            nudge(sideFwdMs)
+        } else {
+            nudge(turnFwdMs)
+        }
         return spin(dir, turnSpeed, turnBlindMs)
     }
 
@@ -198,9 +222,7 @@ namespace PTKidsMission {
         const pass = Math.idiv(arg, 10)
         if (kd == MissionNav.K_YELLOW) {
             // stopped on the stop bar; the yellow box sits just past it (no line)
-            PTKidsBITRobot.motorGo(runMin, runMin)
-            basic.pause(arriveYellowMs)
-            PTKidsBITRobot.motorStop()
+            nudge(arriveYellowMs)
             return true
         }
         if (!leaveWide()) return false
@@ -224,13 +246,19 @@ namespace PTKidsMission {
             } else pdStep()
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
-        const ms = kd == MissionNav.K_BOX ? arriveBoxMs : arriveZoneMs
-        if (ms > 0) {
-            PTKidsBITRobot.motorGo(runMin, runMin)
-            basic.pause(ms)
-            PTKidsBITRobot.motorStop()
-        }
+        let ms = arriveBoxMs
+        if (kd == MissionNav.K_ZONE) ms = goalNode == MissionNav.S ? arriveStartMs : arriveZoneMs
+        nudge(ms)
         return true
+    }
+
+    /** drive forward ms (> 0) or back -ms (< 0) at the base speed, then stop */
+    function nudge(ms: number): void {
+        if (ms == 0) return
+        const v = ms > 0 ? runMin : -runMin
+        PTKidsBITRobot.motorGo(v, v)
+        basic.pause(Math.abs(ms))
+        PTKidsBITRobot.motorStop()
     }
 
     function run(acts: number[]): boolean {
@@ -271,6 +299,7 @@ namespace PTKidsMission {
         const goal = MissionNav.pointNode(to)
         const acts = MissionNav.plan(curNode, curHeading, goal)
         if (acts.length == 0) return
+        goalNode = goal
         if (run(acts)) {
             curNode = goal
             curHeading = MissionNav.finalHeading()
@@ -331,12 +360,44 @@ namespace PTKidsMission {
     }
 
     /**
-     * เวลาเดินต่อหลังหยุดที่ปลายทาง
+     * เวลาเดินต่อหลังหยุดที่ปลายทาง (ค่าติดลบ = ถอยกลับ)
      */
-    //% block="ตั้งค่าการเข้าจุดปลายทาง Box $boxMs ms START/ช่องสี $zoneMs ms Box เหลือง $yellowMs ms"
-    //% boxMs.defl=0 zoneMs.defl=300 yellowMs.defl=250
+    //% block="ตั้งค่าการเข้าจุดปลายทาง Box $boxMs ms START $startMs ms Box เหลือง $yellowMs ms"
+    //% boxMs.defl=0 startMs.defl=300 yellowMs.defl=250
     //% group="ตั้งค่า" weight=30 inlineInputMode=inline
-    export function setArrive(boxMs: number, zoneMs: number, yellowMs: number): void {
-        arriveBoxMs = boxMs; arriveZoneMs = zoneMs; arriveYellowMs = yellowMs
+    export function setArrive(boxMs: number, startMs: number, yellowMs: number): void {
+        arriveBoxMs = boxMs; arriveStartMs = startMs; arriveYellowMs = yellowMs
+    }
+
+    /**
+     * เวลาเดินต่อหลังเจอขอบช่องขาว/ช่องดำ: 0 = หยุดที่ขอบ, ค่าบวก = เดินเข้าไป, ค่าติดลบ = ถอยกลับ
+     */
+    //% block="ตั้งค่าการเข้าช่องขาว/ช่องดำ $ms ms"
+    //% ms.defl=0
+    //% group="ตั้งค่า" weight=25
+    export function setArriveZone(ms: number): void {
+        arriveZoneMs = ms
+    }
+
+    /**
+     * ใส่ค่าคาลิเบรตเซนเซอร์ข้าง ADC6 (ซ้าย) และ ADC7 (ขวา) เอง (ค่าจาก Serial หลัง SensorCalibrate)
+     */
+    //% block="ตั้งค่าเซนเซอร์ข้าง ADC6 เส้น $line6 พื้น $ground6 ADC7 เส้น $line7 พื้น $ground7"
+    //% group="ตั้งค่า" weight=20 inlineInputMode=inline
+    export function setSideSensors(line6: number, ground6: number, line7: number, ground7: number): void {
+        Side_Line = [line6, line7]
+        Side_Ground = [ground6, ground7]
+    }
+
+    /**
+     * เลี้ยวด้วยเซนเซอร์ข้าง: เดินหน้าจนเซนเซอร์ข้างเห็นเส้นตัด แล้วเดินต่อ ms ก่อนหมุน
+     * (ปิด หรือยังไม่คาลิเบรต = ใช้เวลา "เดินหน้าก่อนเลี้ยว" ใน ตั้งค่าการเลี้ยว แทน)
+     */
+    //% block="ตั้งค่าเลี้ยวด้วยเซนเซอร์ข้าง ใช้ $on เดินต่อ $ms ms"
+    //% on.defl=true ms.defl=100
+    //% group="ตั้งค่า" weight=15 inlineInputMode=inline
+    export function setSideTurn(on: boolean, ms: number): void {
+        sideTurn = on
+        sideFwdMs = ms
     }
 }

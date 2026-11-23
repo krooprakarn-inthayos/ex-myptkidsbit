@@ -49,6 +49,8 @@ let Servo_12_Degree = 0
 let distance = 0
 let timer = 0
 let Calibrating = false   // PTKidsBIT Mission: true while SensorCalibrate runs
+let Side_Line: number[] = []     // PTKidsBIT Mission: side sensors ADC6 (left), ADC7 (right) on black
+let Side_Ground: number[] = []   // ... and on white
 
 enum Motor_Write {
     //% block="Left"
@@ -1767,8 +1769,11 @@ namespace PTKidsBITRobot {
             for (let j = 0; j < _Num_Sensor; j++) {
                 Line_Cal[j] += ADCRead(ADC_PIN[_Sensor_PIN[j]])
             }
+            Line_Cal[6] += ADCRead(ADC_Read.ADC6)   // PTKidsBIT Mission: side sensors
+            Line_Cal[7] += ADCRead(ADC_Read.ADC7)
             basic.pause(50)
         }
+        Side_Line = [Line_Cal[6] / 20, Line_Cal[7] / 20]
         for (let i = 0; i < _Num_Sensor; i++) {
             Line_Cal[i] = Line_Cal[i] / 20
             for (let j = 0; j < 8; j++) {
@@ -1795,8 +1800,11 @@ namespace PTKidsBITRobot {
             for (let j = 0; j < _Num_Sensor; j++) {
                 Background_Cal[j] += ADCRead(ADC_PIN[_Sensor_PIN[j]])
             }
+            Background_Cal[6] += ADCRead(ADC_Read.ADC6)   // PTKidsBIT Mission: side sensors
+            Background_Cal[7] += ADCRead(ADC_Read.ADC7)
             basic.pause(50)
         }
+        Side_Ground = [Background_Cal[6] / 20, Background_Cal[7] / 20]
         for (let i = 0; i < _Num_Sensor; i++) {
             Background_Cal[i] = Background_Cal[i] / 20
             for (let j = 0; j < 8; j++) {
@@ -1848,6 +1856,8 @@ namespace PTKidsBITRobot {
             sensor_value += " " + Math.round(Color_Background_All[i])
         }
         serial.writeLine("" + sensor_value)
+        serial.writeLine("Side Line (ADC6 ADC7): " + Math.round(Side_Line[0]) + " " + Math.round(Side_Line[1]))
+        serial.writeLine("Side Ground (ADC6 ADC7): " + Math.round(Side_Ground[0]) + " " + Math.round(Side_Ground[1]))
         Calibrating = false
     }
 }
