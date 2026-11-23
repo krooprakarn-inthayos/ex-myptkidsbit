@@ -84,6 +84,8 @@ namespace MissionNav {
                 if (m < 0) continue
                 if (m == MissionNav.Y && goal != MissionNav.Y) continue
                 if (m == start && backFirst) continue // never back into the box we just left
+                // enter a box straight: never turn on the crossing right next to it (the body sweeps the box)
+                if (m == goal && MissionNav.kind(goal) == MissionNav.K_BOX && oh != h) continue
                 let c = du + MissionNav.edgeLength(n, m) / SPEED_CM_S
                 if (oh != h) c += COST_TURN
                 else if (MissionNav.isJunction(n) && n != s0) c += COST_CROSS

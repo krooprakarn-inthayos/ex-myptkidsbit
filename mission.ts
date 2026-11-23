@@ -429,13 +429,14 @@ namespace PTKidsMission {
     }
 
     /**
+     * (ไม่จำเป็นตั้งแต่ 0.4.0: หุ่นเข้าหา Box แบบทางตรงเสมอ — เก็บไว้ให้โปรแกรมเก่าคอมไพล์ได้)
      * กริปเปอร์อัตโนมัติ: ตอนเลี้ยวเข้าหา Box ที่อยู่ถัดจากแยก หุ่นจะยกแขน+หุบมือจับ เลี้ยว ถอยกลับมาที่แยก
      * แล้วลดแขน+อ้ามือจับ ก่อนวิ่งเข้าหา Box (กันกริปเปอร์กวาดชนกล่อง)
      */
     //% block="ตั้งค่ากริปเปอร์ แขน $arm ยกขึ้น $up ลดลง $down มือจับ $grip อ้า $open หนีบ $close"
     //% arm.defl=Servo_Write.P8 up.defl=90 down.defl=0 grip.defl=Servo_Write.P12 open.defl=180 close.defl=0
     //% up.min=0 up.max=180 down.min=0 down.max=180 open.min=0 open.max=180 close.min=0 close.max=180
-    //% group="ตั้งค่า" weight=10 inlineInputMode=inline
+    //% group="ตั้งค่า" weight=10 inlineInputMode=inline blockHidden=true
     export function setGripper(arm: Servo_Write, up: number, down: number, grip: Servo_Write, open: number, close: number): void {
         armServo = arm; armUp = up; armDown = down
         gripServo = grip; gripOpen = open; gripClose = close
@@ -446,7 +447,7 @@ namespace PTKidsMission {
      * ปิดกริปเปอร์อัตโนมัติ
      */
     //% block="ปิดกริปเปอร์อัตโนมัติ"
-    //% group="ตั้งค่า" weight=5
+    //% group="ตั้งค่า" weight=5 blockHidden=true
     export function clearGripper(): void {
         gripOn = false
     }
