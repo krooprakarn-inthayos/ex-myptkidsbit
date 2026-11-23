@@ -247,15 +247,24 @@ namespace PTKidsMission {
      */
     function backOutOfZone(): boolean {
         const t = control.millis()
+        const v = Math.min(runMin, approachSpeed)   // reverse slowly: easier to keep the line
         let lineReads = 0
+        prevError = 0
         while (true) {
             readSensors()
             const on = countOn()
-            if (on >= 1 && on <= 3 && centerOnLine()) lineReads++
-            else if (on < 5) lineReads = 0
+            // the plain line seen at least 3 times in total (a short drift off it does not reset this)
+            if (on >= 1 && on <= 3) lineReads++
             if (on >= 5 && lineReads >= 3) { PTKidsBITRobot.motorStop(); return true }
-            PTKidsBITRobot.motorGo(-runMin, -runMin)
-            if (control.millis() - t > 3000) return false
+            if (on >= 1 && on <= 3) {
+                // steer while reversing: same turn direction as forward following, half the gain
+                let pd = runKP * 0.5 * (position() - 1500)
+                const cap = v * 0.8                       // both wheels keep reversing
+                if (pd > cap) pd = cap
+                else if (pd < -cap) pd = -cap
+                PTKidsBITRobot.motorGo(-v - pd, -v + pd)
+            } else PTKidsBITRobot.motorGo(-v, -v)
+            if (control.millis() - t > 4000) return false
         }
     }
 
