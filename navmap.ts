@@ -166,6 +166,30 @@ namespace MissionNav {
         return Math.sqrt(dx * dx + dy * dy) / 8.15
     }
 
+    let segEnd = 0
+
+    /** lengths (cm) of the next `count` crossing-to-crossing segments, walking straight from `node` */
+    export function segmentLengths(node: number, heading: number, count: number): number[] {
+        const out: number[] = []
+        let n = node
+        for (let k = 0; k < count; k++) {
+            let len = 0
+            while (true) {
+                const m = MissionNav.neighbor(n, heading)
+                if (m < 0) { segEnd = n; return out }
+                len += MissionNav.edgeLength(n, m)
+                n = m
+                if (MissionNav.isJunction(n)) break
+            }
+            out.push(len)
+        }
+        segEnd = n
+        return out
+    }
+
+    /** node reached by the last segmentLengths call */
+    export function segmentEnd(): number { return segEnd }
+
     /** menu point → node id (the enum values equal the node ids) */
     export function pointNode(p: number): number {
         return p

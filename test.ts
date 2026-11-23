@@ -4,7 +4,8 @@
 // 4) กด A+B = รอบใหม่ (ใส่สีใหม่ เริ่มนับกล่องใหม่)
 let ready = false
 PTKidsBITRobot.SensorCalibrate()
-PTKidsMission.setRun(30, 60, 0.05, 0.1)
+PTKidsMission.setRun(40, 100, 0.05, 0.1)
+PTKidsMission.setFastRun(70, 10)
 PTKidsMission.setGripper(Servo_Write.P8, 90, 0, Servo_Write.P12, 180, 0)
 PTKidsMission.inputBoxColors()
 ready = true

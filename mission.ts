@@ -37,6 +37,12 @@ namespace PTKidsMission {
     let approachSpeed = 30    // last segment into a box (from its second-last crossing)
     let approachStopMs = 0    // > 0: stop this long after the last crossing before a box
     let showStopReason = false
+    let fastSpeed = 0        // > runMin: base speed on straights between crossings (0 = off)
+    let brakeCm = 10         // slow to runMin this far before the crossing where the robot stops
+    let cmPerMs = 1.5        // learned travel speed at fastSpeed (starts high = brakes early, safe)
+    const RAMP = 5           // base speed step per loop when speeding up
+    let gripHoldMs = 250     // wait after closing before driving off
+    let gripReleaseMs = 200  // wait after opening before driving off
     let boxStopAtCrossing = false   // stop on the crossing right before a box (gripper reaches the box from there)
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
@@ -152,23 +158,44 @@ namespace PTKidsMission {
     }
 
     /** follow the line and stop on the n-th crossing */
-    function follow(n: number): boolean {
+    /** base speed for this moment: fast on segments that are only passed, braking on the last one */
+    function segmentBase(c: number, n: number, lens: number[], segT: number): number {
+        if (fastSpeed <= runMin || c >= lens.length) return runMin
+        if (c < n - 1) return fastSpeed
+        const boostMs = (lens[c] - brakeCm) / cmPerMs
+        return control.millis() - segT < boostMs ? fastSpeed : runMin
+    }
+
+    function rampTo(cur: number, target: number): number {
+        return target <= cur ? target : Math.min(target, cur + RAMP)
+    }
+
+    function follow(n: number, lens: number[]): boolean {
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
         let clear = CLEAR_READS   // armed at the start; only a crossing just counted disarms it
         const t = control.millis()
+        let segT = t
+        let base = runMin
         while (true) {
             readSensors()
             const on = countOn()
             if (isWide() && clear >= CLEAR_READS) {
+                // learn the real speed on a segment driven fast from end to end (not the first: it starts from rest)
+                if (fastSpeed > runMin && c >= 1 && c < n - 1 && c < lens.length) {
+                    const v = lens[c] / Math.max(1, control.millis() - segT)
+                    cmPerMs = Math.max(0.2, Math.min(2, (cmPerMs + v) / 2))
+                }
                 c++
                 if (c >= n) { PTKidsBITRobot.motorStop(); return true }
-                if (!leaveWide()) return false
+                if (!leaveWideAt(base)) return false
                 clear = leftOnLine()
+                segT = control.millis()
             } else {
                 if (on >= 1 && on <= 3) clear++   // only a counted crossing resets it
-                pdStep()
+                base = rampTo(base, segmentBase(c, n, lens, segT))
+                pdStepAt(base, Math.max(runMax, base))
             }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
@@ -293,7 +320,7 @@ namespace PTKidsMission {
         }
     }
 
-    function arrive(arg: number): boolean {
+    function arrive(arg: number, lens: number[]): boolean {
         const kd = arg % 10
         const pass = Math.idiv(arg, 10)
         if (kd == MissionNav.K_YELLOW) {
@@ -317,6 +344,7 @@ namespace PTKidsMission {
         let lostReads = 0
         const t = control.millis()
         let tLast = t        // when the robot left the last crossing before the box
+        let base = runMin
         let clear = CLEAR_READS   // armed at the start; only a crossing just counted disarms it
         while (true) {
             readSensors()
@@ -337,7 +365,7 @@ namespace PTKidsMission {
                     nudge(arriveBoxMs)
                     return true
                 }
-                if (!leaveWideAt(slowRun ? slow : runMin)) return false
+                if (!leaveWideAt(slowRun ? slow : Math.max(runMin, base))) return false
                 clear = leftOnLine()
                 if (c >= pass) tLast = control.millis()
             } else {
@@ -354,7 +382,11 @@ namespace PTKidsMission {
                     break
                 }
                 if (slowRun) pdStepAt(slow, runMax)
-                else pdStep()
+                else {
+                    // segments that end in a crossing to pass (c < pass) can run fast
+                    base = rampTo(base, fastSpeed > runMin && c < pass && !(toBox && c >= pass - 1) ? fastSpeed : runMin)
+                    pdStepAt(base, Math.max(runMax, base))
+                }
             }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
@@ -408,16 +440,25 @@ namespace PTKidsMission {
 
     function run(acts: number[]): boolean {
         const armAt = lastFollowBeforeZone(acts)
+        let tn = curNode, th = curHeading   // where the plan says the robot is (for segment lengths)
         for (let i = 0; i < acts.length; i += 2) {
             const op = acts[i], arg = acts[i + 1]
             let ok = true
+            let lens: number[] = []
+            if (op == MissionNav.OP_FOLLOW || (op == MissionNav.OP_ARRIVE && arg % 10 != MissionNav.K_YELLOW)) {
+                const k = op == MissionNav.OP_FOLLOW ? arg : Math.idiv(arg, 10)
+                lens = MissionNav.segmentLengths(tn, th, k)
+                tn = MissionNav.segmentEnd()
+            } else if (op == MissionNav.OP_BACK) tn = MissionNav.neighbor(tn, (th + 2) % 4)
+            else if (op == MissionNav.OP_UTURN) th = (th + 2) % 4
+            else if (op == MissionNav.OP_TURN) th = (th + (arg == 1 ? 1 : 3)) % 4
             const nextIsBox = i + 3 < acts.length && acts[i + 2] == MissionNav.OP_ARRIVE && acts[i + 3] == MissionNav.K_BOX
             if (op == MissionNav.OP_TURN && gripOn && nextIsBox) ok = turnIntoBox(arg)
             else if (op == MissionNav.OP_UTURN) ok = uturn(arg)
             else if (op == MissionNav.OP_EXIT) ok = exitZone()
-            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg)
+            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
-            else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg)
+            else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) nudge(-arriveBoxMs)
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) return false
@@ -609,6 +650,30 @@ namespace PTKidsMission {
     }
 
     /**
+     * วิ่งเร็วบนทางตรง: ช่วงที่แค่วิ่งผ่านแยกใช้ความเร็วนี้ตลอด ช่วงสุดท้ายก่อนแยกที่ต้องหยุด/เลี้ยว
+     * ชะลอลงเป็นความเร็วต่ำสุดเมื่อเหลือระยะเบรก (หุ่นวัดความเร็วจริงจากเวลาวิ่งระหว่างแยกเอง)
+     * ความเร็ว 0 = ปิด · ควรตั้ง "สูงสุด" ใน ตั้งค่าการวิ่ง ให้มากกว่าความเร็วนี้ เพื่อให้มีแรงแก้เส้น
+     */
+    //% block="ตั้งค่าวิ่งเร็วทางตรง ความเร็ว $speed เบรกก่อนถึงแยก $cm ซม."
+    //% speed.defl=70 cm.defl=10
+    //% group="ตั้งค่า" weight=99
+    export function setFastRun(speed: number, cm: number): void {
+        fastSpeed = speed
+        brakeCm = cm
+    }
+
+    /**
+     * เวลารอของกริปเปอร์ในภารกิจอัตโนมัติ: หลังหนีบก่อนออกวิ่ง และหลังอ้าวางก่อนถอย (ms)
+     */
+    //% block="ตั้งค่าเวลากริปเปอร์ หนีบ $holdMs ms ปล่อย $releaseMs ms"
+    //% holdMs.defl=250 releaseMs.defl=200
+    //% group="ภารกิจอัตโนมัติ" weight=9
+    export function setGripTiming(holdMs: number, releaseMs: number): void {
+        gripHoldMs = holdMs
+        gripReleaseMs = releaseMs
+    }
+
+    /**
      * หยุดที่แยกสุดท้ายก่อนถึง Box แทนการวิ่งไปหาขอบกรอบ Box
      * ใช้เมื่อกริปเปอร์ยื่นไปข้างหน้าไกล (วิ่งถึงขอบกรอบแล้วกริปเปอร์ชนกล่อง)
      * ปรับระยะต่อด้วย "ตั้งค่าการเข้าจุดปลายทาง Box … ms" (บวก = เดินหน้าต่อ, ลบ = ถอย)
@@ -653,27 +718,24 @@ namespace PTKidsMission {
 
     function servo(s: Servo_Write, d: number): void { PTKidsBITRobot.servoWrite(s, d) }
 
-    /** arm down + gripper open, ready to drive onto a box */
+    /** arm down + gripper open, ready to drive onto a box (moves while the robot drives there) */
     function gripReady(): void {
         servo(armServo, armDown)
         servo(gripServo, gripOpen)
-        basic.pause(SERVO_MS)
     }
-    /** close on the box and lift it off the floor */
+    /** close on the box, then lift: the arm rises while the robot already backs away */
     function gripTake(): void {
         servo(gripServo, gripClose)
-        basic.pause(SERVO_MS)
+        basic.pause(gripHoldMs)
         servo(armServo, armUp)
-        basic.pause(SERVO_MS)
     }
-    /** put the box down, let go and lift the empty gripper clear */
+    /** put the box down and let go; the empty arm lifts while the robot backs out */
     function gripDrop(): void {
         servo(armServo, armDown)                       // already down when lowered on the last crossing
         if (!lowerArmBeforeZone) basic.pause(SERVO_MS)
         servo(gripServo, gripOpen)
-        basic.pause(SERVO_MS)
+        basic.pause(gripReleaseMs)
         servo(armServo, armUp)
-        basic.pause(SERVO_MS)
     }
 
     function colorsReady(): boolean {
