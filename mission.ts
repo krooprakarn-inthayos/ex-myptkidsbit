@@ -26,6 +26,7 @@ namespace PTKidsMission {
     let arriveZoneMs = 0      // white / black zone: stop at the frame edge
     let goalNode = -1
     let arriveYellowMs = 250
+    let approachSpeed = 30    // last segment into a box (after its last crossing)
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
@@ -83,14 +84,18 @@ namespace PTKidsMission {
     }
 
     function pdStep(): void {
+        pdStepAt(runMin, runMax)
+    }
+
+    function pdStepAt(base: number, max: number): void {
         const err = position() - 1500
         const pd = runKP * err + runKD * (err - prevError)
         prevError = err
-        let l = runMin - pd, r = runMin + pd
-        if (l > runMax) l = runMax
-        else if (l < -runMax) l = -runMax
-        if (r > runMax) r = runMax
-        else if (r < -runMax) r = -runMax
+        let l = base - pd, r = base + pd
+        if (l > max) l = max
+        else if (l < -max) l = -max
+        if (r > max) r = max
+        else if (r < -max) r = -max
         PTKidsBITRobot.motorGo(l, r)
     }
 
@@ -245,14 +250,17 @@ namespace PTKidsMission {
             const on = countOn()
             if (centerOnLine()) seenLine = true
             lostReads = on == 0 ? lostReads + 1 : 0
+            // last segment into a box: slow down, and the small box frame (≥ 4 sensors) counts as arrival
+            const boxRun = kd == MissionNav.K_BOX && c >= pass
             if (on >= 5 && c < pass) {
                 c++
                 if (!leaveWide()) return false
-            } else if (on >= 5 || (seenLine && lostReads >= 3)) {
+            } else if (on >= 5 || (boxRun && on >= 4) || (seenLine && lostReads >= 3)) {
                 // frame edge of the target square, or the line really ended
                 PTKidsBITRobot.motorStop()
                 break
-            } else pdStep()
+            } else if (boxRun) pdStepAt(Math.min(approachSpeed, runMin), runMax)
+            else pdStep()
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
         let ms = arriveBoxMs
@@ -450,5 +458,15 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=5 blockHidden=true
     export function clearGripper(): void {
         gripOn = false
+    }
+
+    /**
+     * ความเร็วช่วงสุดท้ายก่อนถึง Box (หลังผ่านแยกสุดท้าย) ยิ่งช้า ยิ่งหยุดแม่น ไม่ชนกล่อง
+     */
+    //% block="ตั้งค่าความเร็วเข้า Box $speed"
+    //% speed.defl=30 speed.min=10 speed.max=100
+    //% group="ตั้งค่า" weight=28
+    export function setApproach(speed: number): void {
+        approachSpeed = speed
     }
 }
