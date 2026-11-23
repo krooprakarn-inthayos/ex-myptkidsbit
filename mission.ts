@@ -28,6 +28,15 @@ namespace PTKidsMission {
     let arriveYellowMs = 250
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
+    // gripper handling on the turn into a box (off until setGripper is used)
+    let gripOn = false
+    let armServo = Servo_Write.P8
+    let armUp = 90
+    let armDown = 0
+    let gripServo = Servo_Write.P12
+    let gripOpen = 180
+    let gripClose = 0
+    const SERVO_MS = 300
 
     const FOLLOW_TIMEOUT = 8000
     const SPIN_TIMEOUT = 3000
@@ -261,11 +270,29 @@ namespace PTKidsMission {
         PTKidsBITRobot.motorStop()
     }
 
+    /**
+     * turn towards a box that is right after this crossing: the open gripper would sweep into it.
+     * lift + close, turn, back the sensors onto the crossing, then lower + open before driving in.
+     */
+    function turnIntoBox(dir: number): boolean {
+        PTKidsBITRobot.servoWrite(armServo, armUp)
+        PTKidsBITRobot.servoWrite(gripServo, gripClose)
+        basic.pause(SERVO_MS)
+        if (!turn(dir)) return false
+        const ok = backToCrossing(0)
+        PTKidsBITRobot.servoWrite(armServo, armDown)
+        PTKidsBITRobot.servoWrite(gripServo, gripOpen)
+        basic.pause(SERVO_MS)
+        return ok
+    }
+
     function run(acts: number[]): boolean {
         for (let i = 0; i < acts.length; i += 2) {
             const op = acts[i], arg = acts[i + 1]
             let ok = true
-            if (op == MissionNav.OP_UTURN) ok = uturn(arg)
+            const nextIsBox = i + 3 < acts.length && acts[i + 2] == MissionNav.OP_ARRIVE && acts[i + 3] == MissionNav.K_BOX
+            if (op == MissionNav.OP_TURN && gripOn && nextIsBox) ok = turnIntoBox(arg)
+            else if (op == MissionNav.OP_UTURN) ok = uturn(arg)
             else if (op == MissionNav.OP_EXIT) ok = exitZone()
             else if (op == MissionNav.OP_FOLLOW) ok = follow(arg)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
@@ -399,5 +426,28 @@ namespace PTKidsMission {
     export function setSideTurn(on: boolean, ms: number): void {
         sideTurn = on
         sideFwdMs = ms
+    }
+
+    /**
+     * กริปเปอร์อัตโนมัติ: ตอนเลี้ยวเข้าหา Box ที่อยู่ถัดจากแยก หุ่นจะยกแขน+หุบมือจับ เลี้ยว ถอยกลับมาที่แยก
+     * แล้วลดแขน+อ้ามือจับ ก่อนวิ่งเข้าหา Box (กันกริปเปอร์กวาดชนกล่อง)
+     */
+    //% block="ตั้งค่ากริปเปอร์ แขน $arm ยกขึ้น $up ลดลง $down มือจับ $grip อ้า $open หนีบ $close"
+    //% arm.defl=Servo_Write.P8 up.defl=90 down.defl=0 grip.defl=Servo_Write.P12 open.defl=180 close.defl=0
+    //% up.min=0 up.max=180 down.min=0 down.max=180 open.min=0 open.max=180 close.min=0 close.max=180
+    //% group="ตั้งค่า" weight=10 inlineInputMode=inline
+    export function setGripper(arm: Servo_Write, up: number, down: number, grip: Servo_Write, open: number, close: number): void {
+        armServo = arm; armUp = up; armDown = down
+        gripServo = grip; gripOpen = open; gripClose = close
+        gripOn = true
+    }
+
+    /**
+     * ปิดกริปเปอร์อัตโนมัติ
+     */
+    //% block="ปิดกริปเปอร์อัตโนมัติ"
+    //% group="ตั้งค่า" weight=5
+    export function clearGripper(): void {
+        gripOn = false
     }
 }
