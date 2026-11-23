@@ -775,6 +775,12 @@ namespace PTKidsMission {
         }
     }
 
+    /** short rising tune: colours entered, ready to start */
+    function playDoneTune(): void {
+        const notes = [523, 659, 784, 1047]   // C5 E5 G5 C6
+        for (let i = 0; i < notes.length; i++) music.playTone(notes[i], i == notes.length - 1 ? 300 : 120)
+    }
+
     /**
      * ใส่สีกล่องด้วยปุ่มบนหุ่น ไฟกะพริบ = ช่องที่กำลังถาม (แถวบน = ฝั่งช่องขาว)
      * กด A = กล่องดำ, กด B = กล่องขาว วนตามเข็มนาฬิกา 8 ช่อง แล้วแสดงสรุป (ไฟติด = ดำ)
@@ -795,7 +801,8 @@ namespace PTKidsMission {
             }
             if (colorsReady()) {
                 showColors()
-                basic.pause(1500)
+                playDoneTune()
+                basic.pause(1000)
                 return
             }
             basic.showIcon(IconNames.No)
