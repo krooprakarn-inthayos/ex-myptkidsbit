@@ -9,6 +9,7 @@
  *   4 TURN   arg = 0 left, 1 right (at the junction the robot is stopped on)
  *   5 ARRIVE arg = kind + 10 × junctions passed straight first
  *   6 BACK   arg = 0 (reverse off a box / yellow until the sensors are on the nearest crossing)
+ *            arg = 2 (reverse out of START / a zone: over the frame edge, then to the nearest crossing)
  */
 namespace MissionNav {
     export const OP_UTURN = 1
@@ -57,7 +58,7 @@ namespace MissionNav {
         let forcedUturn = false
         let s0 = start, h0 = heading
         if (MissionNav.neighbor(start, heading) < 0) {
-            if (sk == MissionNav.K_BOX || sk == MissionNav.K_YELLOW) {
+            if (sk == MissionNav.K_BOX || sk == MissionNav.K_YELLOW || sk == MissionNav.K_ZONE) {
                 backFirst = true
                 s0 = MissionNav.neighbor(start, (heading + 2) % 4)
             } else {
@@ -102,7 +103,7 @@ namespace MissionNav {
         const first = path[0]
         const uturnOnCrossing = first % 4 != h0
         if (backFirst) {
-            acts.push(OP_BACK); acts.push(0)
+            acts.push(OP_BACK); acts.push(sk == MissionNav.K_ZONE ? MissionNav.K_ZONE : 0)
             if (uturnOnCrossing) { acts.push(OP_UTURN); acts.push(MissionNav.K_JUNCTION) }
         } else if (forcedUturn) {
             acts.push(OP_UTURN); acts.push(sk)

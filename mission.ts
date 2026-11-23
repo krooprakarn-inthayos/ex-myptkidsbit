@@ -26,7 +26,8 @@ namespace PTKidsMission {
     let arriveZoneMs = 0      // white / black zone: stop at the frame edge
     let goalNode = -1
     let arriveYellowMs = 250
-    let approachSpeed = 30    // last segment into a box (after its last crossing)
+    let approachSpeed = 30    // last segment into a box (from its second-last crossing)
+    let approachStopMs = 0    // > 0: stop this long after the last crossing before a box
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
@@ -117,11 +118,15 @@ namespace PTKidsMission {
 
     /** drive straight off a crossing / frame edge the sensors are sitting on */
     function leaveWide(): boolean {
+        return leaveWideAt(runMin)
+    }
+
+    function leaveWideAt(v: number): boolean {
         const t = control.millis()
         while (true) {
             readSensors()
             if (!isWide()) return true
-            PTKidsBITRobot.motorGo(runMin, runMin)
+            PTKidsBITRobot.motorGo(v, v)
             if (control.millis() - t > 1500) return false
         }
     }
@@ -210,6 +215,24 @@ namespace PTKidsMission {
         }
     }
 
+    /**
+     * reverse out of START / a zone: the frame edge is ignored until the plain line has been seen
+     * for a few reads, then stop on the nearest crossing.
+     */
+    function backOutOfZone(): boolean {
+        const t = control.millis()
+        let lineReads = 0
+        while (true) {
+            readSensors()
+            const on = countOn()
+            if (on >= 1 && on <= 3 && centerOnLine()) lineReads++
+            else if (on < 5) lineReads = 0
+            if (on >= 5 && lineReads >= 3) { PTKidsBITRobot.motorStop(); return true }
+            PTKidsBITRobot.motorGo(-runMin, -runMin)
+            if (control.millis() - t > 3000) return false
+        }
+    }
+
     function uturn(kind: number): boolean {
         // START / zone: come back to the frame edge first, then spin like on a crossing
         if (kind == MissionNav.K_ZONE && !backToCrossing(0)) return false
@@ -239,27 +262,35 @@ namespace PTKidsMission {
             nudge(arriveYellowMs)
             return true
         }
-        if (!leaveWide()) return false
+        const toBox = kd == MissionNav.K_BOX
+        const slow = Math.min(approachSpeed, runMin)
+        // into a box with nothing to pass: slow from the start
+        if (!leaveWideAt(toBox && pass == 0 ? slow : runMin)) return false
         prevError = 0
         let c = 0
         let seenLine = false
         let lostReads = 0
         const t = control.millis()
+        let tLast = t        // when the robot left the last crossing before the box
         while (true) {
             readSensors()
             const on = countOn()
             if (centerOnLine()) seenLine = true
             lostReads = on == 0 ? lostReads + 1 : 0
-            // last segment into a box: slow down, and the small box frame (≥ 4 sensors) counts as arrival
-            const boxRun = kd == MissionNav.K_BOX && c >= pass
+            // into a box: slow down from the second-last crossing; after the last one the small
+            // box frame (≥ 4 sensors) or the approach timer ends the run
+            const slowRun = toBox && c >= pass - 1
+            const boxRun = toBox && c >= pass
             if (on >= 5 && c < pass) {
                 c++
-                if (!leaveWide()) return false
-            } else if (on >= 5 || (boxRun && on >= 4) || (seenLine && lostReads >= 3)) {
-                // frame edge of the target square, or the line really ended
+                if (!leaveWideAt(slowRun ? slow : runMin)) return false
+                if (c >= pass) tLast = control.millis()
+            } else if (on >= 5 || (boxRun && on >= 4) || (seenLine && lostReads >= 3)
+                || (boxRun && approachStopMs > 0 && control.millis() - tLast >= approachStopMs)) {
+                // frame edge of the target square, the line really ended, or the approach time is up
                 PTKidsBITRobot.motorStop()
                 break
-            } else if (boxRun) pdStepAt(Math.min(approachSpeed, runMin), runMax)
+            } else if (slowRun) pdStepAt(slow, runMax)
             else pdStep()
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
         }
@@ -305,7 +336,7 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_FOLLOW) ok = follow(arg)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg)
-            else if (op == MissionNav.OP_BACK) ok = backToCrossing(uturnBackMs)
+            else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) return false
         }
         return true
@@ -468,5 +499,16 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=28
     export function setApproach(speed: number): void {
         approachSpeed = speed
+    }
+
+    /**
+     * หยุดตามเวลาหลังผ่านแยกสุดท้ายก่อนถึง Box (0 = หยุดเมื่อเซนเซอร์เห็นขอบกรอบ Box)
+     * ใช้เมื่อหุ่นยังดันกล่อง: ตั้งให้หยุดตอนกริปเปอร์ครอบกล่องพอดี
+     */
+    //% block="ตั้งค่าหยุดหลังผ่านแยกสุดท้ายก่อนถึง Box $ms ms"
+    //% ms.defl=0 ms.min=0
+    //% group="ตั้งค่า" weight=27
+    export function setApproachStop(ms: number): void {
+        approachStopMs = ms
     }
 }
