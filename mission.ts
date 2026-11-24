@@ -309,6 +309,19 @@ namespace PTKidsMission {
         // always: the robot slides past the crossing when it stops, whatever the Box time is.
         // Reversing a little too far is harmless (the turn drives forward to the line again).
         const v = Math.min(runMin, approachSpeed)
+        if (sideTurn && sideCalibrated()) {
+            // the side sensors decide where the turn happens: after gripping they are usually past the
+            // crossing line. Reverse until one of them is on it again (front sensors can't tell the
+            // crossing from the box square's edge). Short cap: never far enough to reach the next crossing.
+            const t0 = control.millis()
+            const cap = Math.max(0, boxMsFor(curNode)) * runMin / v * 1.5 + 250
+            while (!sideOnLine()) {
+                PTKidsBITRobot.motorGo(-v, -v)
+                if (control.millis() - t0 > cap) break
+            }
+            PTKidsBITRobot.motorStop()
+            return true
+        }
         // already on the crossing (small Box time): stay. Reversing from here would reach the NEXT crossing.
         readSensors()
         if (countOn() >= 4) { PTKidsBITRobot.motorStop(); return true }
