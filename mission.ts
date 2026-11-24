@@ -296,31 +296,6 @@ namespace PTKidsMission {
     }
 
     /**
-     * after gripping in "stop on the crossing" mode: the robot crept forward past the crossing.
-     * Reverse until the front sensors are on that crossing again, so the side sensors are behind it
-     * for the turn (a fixed-time reverse can leave them past the line after the stop overshoot).
-     */
-    function backOntoBoxCrossing(): boolean {
-        // always: the robot slides past the crossing when it stops, whatever the Box time is.
-        // Reversing a little too far is harmless (the turn drives forward to the line again).
-        const v = Math.min(runMin, approachSpeed)
-        const limit = Math.max(0, arriveBoxMs) * runMin / v * 2 + 500
-        const t = control.millis()
-        let lineReads = 0
-        while (true) {
-            readSensors()
-            const on = countOn()
-            // the stub line between box and crossing (not white: the inside of the box square is white too)
-            if (on >= 1 && on <= 3) lineReads++
-            else if (on >= 4 && lineReads >= 2) break        // 4+ sensors after the stub line: the crossing
-            PTKidsBITRobot.motorGo(-v, -v)
-            if (control.millis() - t > limit) break          // not found: turn from here
-        }
-        PTKidsBITRobot.motorStop()
-        return true
-    }
-
-    /**
      * reverse out of START / a zone: the frame edge is ignored until the plain line has been seen
      * for a few reads, then stop on the nearest crossing.
      */
@@ -508,7 +483,7 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens, !(smoothTurn && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN), runMin)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
-            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
+            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) nudge(-arriveBoxMs)
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) { pendingArm = false; return false }
             if (i == armAt) {
