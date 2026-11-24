@@ -57,6 +57,8 @@ namespace PTKidsMission {
     let gripOpen = 180
     let gripClose = 0
     const SERVO_MS = 300
+    let smoothTurn = false          // turns without stopping on the crossing or after the spin
+    let pendingArm = false          // lower the arm during the next spin (turn into a colour zone)
     let lowerArmBeforeZone = true   // lower the arm on the crossing before the white/black zone
 
     const FOLLOW_TIMEOUT = 8000
@@ -172,7 +174,7 @@ namespace PTKidsMission {
         return target <= cur ? target : Math.min(target, cur + RAMP)
     }
 
-    function follow(n: number, lens: number[]): boolean {
+    function follow(n: number, lens: number[], stopAtEnd: boolean = true): boolean {
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
@@ -192,7 +194,11 @@ namespace PTKidsMission {
                     speedLearned = true
                 }
                 c++
-                if (c >= n) { PTKidsBITRobot.motorStop(); return true }
+                if (c >= n) {
+                    if (stopAtEnd) PTKidsBITRobot.motorStop()
+                    else PTKidsBITRobot.motorGo(runMin, runMin)   // roll on into the turn at base speed
+                    return true
+                }
                 if (!leaveWideAt(base)) return false
                 clear = leftOnLine()
                 segT = control.millis()
@@ -209,10 +215,17 @@ namespace PTKidsMission {
     //% blockHidden=true
     export function spinToLine(dir: number, speed: number, blindMs: number): boolean { return spin(dir, speed, blindMs) }
 
-    function spin(dir: number, speed: number, blindMs: number): boolean {
+    function spin(dir: number, speed: number, blindMs: number, stopAtEnd: boolean = true): boolean {
         const l = dir == 0 ? -speed : speed
         PTKidsBITRobot.motorGo(l, -l)
-        basic.pause(blindMs)
+        const tb = control.millis()
+        if (pendingArm) {
+            // lower the arm while already spinning (the servo write itself takes ~100 ms on board V1)
+            pendingArm = false
+            PTKidsBITRobot.servoWrite(armServo, armDown)
+        }
+        const left = blindMs - (control.millis() - tb)
+        if (left > 0) basic.pause(left)
         const t = control.millis()
         // phase 1: leave the line the centre sensors may still be on
         while (true) {
@@ -225,7 +238,10 @@ namespace PTKidsMission {
         while (true) {
             readSensors()
             position()   // keep "which side the line was last seen" fresh for the line follower
-            if (centerOnLine()) { PTKidsBITRobot.motorStop(); return true }
+            if (centerOnLine()) {
+                if (stopAtEnd) PTKidsBITRobot.motorStop()
+                return true
+            }
             PTKidsBITRobot.motorGo(l, -l)
             if (control.millis() - t > SPIN_TIMEOUT) return false
         }
@@ -250,12 +266,18 @@ namespace PTKidsMission {
                 PTKidsBITRobot.motorGo(runMin, runMin)
                 if (control.millis() - t > 1000) break   // missed it: turn from here rather than run away
             }
-            PTKidsBITRobot.motorStop()
-            nudge(sideFwdMs)
-        } else {
-            nudge(turnFwdMs)
-        }
-        return spin(dir, turnSpeed, turnBlindMs)
+            if (smoothTurn) roll(sideFwdMs)
+            else { PTKidsBITRobot.motorStop(); nudge(sideFwdMs) }
+        } else if (smoothTurn) roll(turnFwdMs)
+        else nudge(turnFwdMs)
+        return spin(dir, turnSpeed, turnBlindMs, !smoothTurn)
+    }
+
+    /** keep driving forward ms at the base speed without stopping afterwards */
+    function roll(ms: number): void {
+        if (ms <= 0) return
+        PTKidsBITRobot.motorGo(runMin, runMin)
+        basic.pause(ms)
     }
 
     /**
@@ -460,18 +482,19 @@ namespace PTKidsMission {
             if (op == MissionNav.OP_TURN && gripOn && nextIsBox) ok = turnIntoBox(arg)
             else if (op == MissionNav.OP_UTURN) ok = uturn(arg)
             else if (op == MissionNav.OP_EXIT) ok = exitZone()
-            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens)
+            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens, !(smoothTurn && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN))
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) nudge(-arriveBoxMs)
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
-            if (!ok) return false
+            if (!ok) { pendingArm = false; return false }
             if (i == armAt) {
-                // stopped on the crossing just before the colour zone: lower the box now
-                PTKidsBITRobot.servoWrite(armServo, armDown)
-                basic.pause(SERVO_MS)
+                // on the crossing just before the colour zone: lower the box during the turn into it
+                if (i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) pendingArm = true
+                else PTKidsBITRobot.servoWrite(armServo, armDown)
             }
         }
+        if (pendingArm) { pendingArm = false; PTKidsBITRobot.servoWrite(armServo, armDown) }
         return true
     }
 
@@ -664,6 +687,17 @@ namespace PTKidsMission {
     export function setFastRun(speed: number, cm: number): void {
         fastSpeed = speed
         brakeCm = cm
+    }
+
+    /**
+     * เลี้ยวแบบไม่หยุด: วิ่งเข้าแยกแล้วหมุนต่อทันที หมุนเจอเส้นแล้ววิ่งตามเส้นต่อเลย
+     * (ปิด = หยุดบนแยก หยุดก่อนหมุน และหยุดหลังหมุน แบบเดิม)
+     */
+    //% block="เลี้ยวแบบไม่หยุด $on"
+    //% on.defl=true
+    //% group="ตั้งค่า" weight=97
+    export function setSmoothTurn(on: boolean): void {
+        smoothTurn = on
     }
 
     /** ความเร็วจริงที่หุ่นวัดได้ตอนวิ่งเร็ว (ซม./วินาที) */
