@@ -305,12 +305,13 @@ namespace PTKidsMission {
         const v = Math.min(runMin, approachSpeed)
         const limit = arriveBoxMs * runMin / v * 2 + 300
         const t = control.millis()
-        let clearOfFrame = false
+        let lineReads = 0
         while (true) {
             readSensors()
             const on = countOn()
-            if (on <= 3) clearOfFrame = true                 // left the box frame edge (if the sensors were on it)
-            else if (clearOfFrame) break                     // 4+ sensors: the crossing
+            // the stub line between box and crossing (not white: the inside of the box square is white too)
+            if (on >= 1 && on <= 3) lineReads++
+            else if (on >= 4 && lineReads >= 2) break        // 4+ sensors after the stub line: the crossing
             PTKidsBITRobot.motorGo(-v, -v)
             if (control.millis() - t > limit) break          // not found: turn from here
         }
