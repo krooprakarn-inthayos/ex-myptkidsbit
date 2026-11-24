@@ -24,22 +24,39 @@ namespace MissionNav {
         return color == 1 ? MissionNav.WZ : MissionNav.BZ
     }
 
-    function fill(colors: number[]): void {
-        const key = colors.join(",")
-        if (key == cachedColors) return
+    // route costs do not depend on the box colours: plan them once (slow on a micro:bit), reuse for every layout
+    let toZone: number[] = []     // [box * 2 + 0] → white zone, [box * 2 + 1] → black zone
+    let tablesReady = false
+
+    /** plan every route cost the order search needs (about 3 s on a micro:bit V1); later calls do nothing */
+    export function prepareRoutes(): void {
+        if (tablesReady) return
         fromCost = []
         const starts = [MissionNav.S, MissionNav.WZ, MissionNav.BZ]
         for (let f = 0; f < 3; f++) {
             const h = f == 0 ? 0 : MissionNav.startHeading(starts[f])
             for (let i = 0; i < 8; i++) fromCost.push(routeCost(starts[f], h, BOX_NODE[i]))
         }
-        deliverCost = []
-        for (let i = 0; i < 8; i++) deliverCost.push(routeCost(BOX_NODE[i], MissionNav.startHeading(BOX_NODE[i]), zoneOf(colors[i])))
+        toZone = []
+        for (let i = 0; i < 8; i++) {
+            const h = MissionNav.startHeading(BOX_NODE[i])
+            toZone.push(routeCost(BOX_NODE[i], h, MissionNav.WZ))
+            toZone.push(routeCost(BOX_NODE[i], h, MissionNav.BZ))
+        }
         endCost = [0, 0, 0]
         for (let z = 1; z <= 2; z++) {
             const zn = z == 1 ? MissionNav.WZ : MissionNav.BZ
             endCost[z] = routeCost(zn, MissionNav.startHeading(zn), MissionNav.Y) + routeCost(MissionNav.Y, MissionNav.startHeading(MissionNav.Y), MissionNav.S)
         }
+        tablesReady = true
+    }
+
+    function fill(colors: number[]): void {
+        prepareRoutes()
+        const key = colors.join(",")
+        if (key == cachedColors) return
+        deliverCost = []
+        for (let i = 0; i < 8; i++) deliverCost.push(toZone[i * 2 + (colors[i] == 1 ? 0 : 1)])
         cachedColors = key
     }
 
