@@ -301,9 +301,10 @@ namespace PTKidsMission {
      * for the turn (a fixed-time reverse can leave them past the line after the stop overshoot).
      */
     function backOntoBoxCrossing(): boolean {
-        if (arriveBoxMs <= 0) { nudge(-arriveBoxMs); return true }
+        // always: the robot slides past the crossing when it stops, whatever the Box time is.
+        // Reversing a little too far is harmless (the turn drives forward to the line again).
         const v = Math.min(runMin, approachSpeed)
-        const limit = arriveBoxMs * runMin / v * 2 + 300
+        const limit = Math.max(0, arriveBoxMs) * runMin / v * 2 + 500
         const t = control.millis()
         let lineReads = 0
         while (true) {
