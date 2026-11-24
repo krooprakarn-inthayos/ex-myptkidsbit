@@ -361,33 +361,6 @@ namespace PTKidsMission {
     }
 
     /**
-     * leaving the yellow box: the stop bar is right behind it. Reverse until the short line has been
-     * seen and then stop on the first 4+ sensor read (the bar). A time-based "ignore" window reversed
-     * straight past the bar to J4, where the U-turn then caught the side line.
-     */
-    function backOntoStopBar(): boolean {
-        const v = Math.min(moveSpeed(), approachSpeed)
-        // already on the bar (small yellow time): stay. Reversing from here reached J4.
-        readSensors()
-        if (countOn() >= 4) { PTKidsBITRobot.motorStop(); return true }
-        // short cap: never far enough to reach J4 (17 cm behind the bar)
-        const cap = Math.max(0, arriveYellowMs) * moveSpeed() / v * 1.5 + 250
-        const t = control.millis()
-        let lineReads = countOn() >= 1 ? 1 : 0   // on the short line already
-        PTKidsBITRobot.motorGo(-v, -v)
-        while (true) {
-            readSensors()
-            const on = countOn()
-            if (on >= 1 && on <= 3) lineReads++
-            else if (on >= 4 && lineReads >= 1) break     // the bar (the square's edge comes before any line)
-            PTKidsBITRobot.motorGo(-v, -v)
-            if (control.millis() - t > cap) break
-        }
-        PTKidsBITRobot.motorStop()
-        return true
-    }
-
-    /**
      * reverse out of START / a zone: the frame edge is ignored until the plain line has been seen
      * for a few reads, then stop on the nearest crossing.
      */
@@ -577,7 +550,6 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
-            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && MissionNav.kind(curNode) == MissionNav.K_YELLOW) ok = backOntoStopBar()
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) { pendingArm = false; return false }
             if (i == armAt) {
