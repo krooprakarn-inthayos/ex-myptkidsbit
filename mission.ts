@@ -367,14 +367,19 @@ namespace PTKidsMission {
      */
     function backOntoStopBar(): boolean {
         const v = Math.min(moveSpeed(), approachSpeed)
-        const cap = Math.max(0, arriveYellowMs) * moveSpeed() / v * 1.5 + 400
+        // already on the bar (small yellow time): stay. Reversing from here reached J4.
+        readSensors()
+        if (countOn() >= 4) { PTKidsBITRobot.motorStop(); return true }
+        // short cap: never far enough to reach J4 (17 cm behind the bar)
+        const cap = Math.max(0, arriveYellowMs) * moveSpeed() / v * 1.5 + 250
         const t = control.millis()
-        let lineReads = 0
+        let lineReads = countOn() >= 1 ? 1 : 0   // on the short line already
+        PTKidsBITRobot.motorGo(-v, -v)
         while (true) {
             readSensors()
             const on = countOn()
             if (on >= 1 && on <= 3) lineReads++
-            else if (on >= 4 && lineReads >= 2) break
+            else if (on >= 4 && lineReads >= 1) break     // the bar (the square's edge comes before any line)
             PTKidsBITRobot.motorGo(-v, -v)
             if (control.millis() - t > cap) break
         }
