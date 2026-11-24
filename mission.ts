@@ -175,8 +175,7 @@ namespace PTKidsMission {
         return target <= cur ? target : Math.min(target, cur + RAMP)
     }
 
-    function follow(n: number, lens: number[], stopAtEnd: boolean = true, endBase: number = -1): boolean {
-        if (endBase < 0) endBase = runMin
+    function follow(n: number, lens: number[], stopAtEnd: boolean, endBase: number): boolean {
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
@@ -215,9 +214,9 @@ namespace PTKidsMission {
 
     /** spin (dir 0 = left, 1 = right) blind for blindMs, then until a centre sensor sees a line */
     //% blockHidden=true
-    export function spinToLine(dir: number, speed: number, blindMs: number): boolean { return spin(dir, speed, blindMs) }
+    export function spinToLine(dir: number, speed: number, blindMs: number): boolean { return spin(dir, speed, blindMs, true) }
 
-    function spin(dir: number, speed: number, blindMs: number, stopAtEnd: boolean = true): boolean {
+    function spin(dir: number, speed: number, blindMs: number, stopAtEnd: boolean): boolean {
         const l = dir == 0 ? -speed : speed
         PTKidsBITRobot.motorGo(l, -l)
         const tb = control.millis()
@@ -330,7 +329,7 @@ namespace PTKidsMission {
     function uturn(kind: number): boolean {
         // START / zone: come back to the frame edge first, then spin like on a crossing
         if (kind == MissionNav.K_ZONE && !backToCrossing(0)) return false
-        return spin(1, uturnSpeed, uturnBlindMs)
+        return spin(1, uturnSpeed, uturnBlindMs, true)
     }
 
     /** from inside START / a zone, drive out across the frame edge onto the line */
@@ -481,7 +480,7 @@ namespace PTKidsMission {
             if (op == MissionNav.OP_TURN && gripOn && nextIsBox) ok = turnIntoBox(arg)
             else if (op == MissionNav.OP_UTURN) ok = uturn(arg)
             else if (op == MissionNav.OP_EXIT) ok = exitZone()
-            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens, !(smoothTurn && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN))
+            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens, !(smoothTurn && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN), runMin)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) nudge(-arriveBoxMs)
