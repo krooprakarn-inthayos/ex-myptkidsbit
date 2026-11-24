@@ -163,18 +163,20 @@ namespace PTKidsMission {
 
     /** follow the line and stop on the n-th crossing */
     /** base speed for this moment: fast on segments that are only passed, braking on the last one */
-    function segmentBase(c: number, n: number, lens: number[], segT: number): number {
-        if (fastSpeed <= runMin || c >= lens.length) return runMin
-        if (c < n - 1) return fastSpeed
+    function segmentBase(c: number, n: number, lens: number[], segT: number, endBase: number): number {
+        const fast = fastSpeed > runMin && c < lens.length
+        if (c < n - 1) return fast ? fastSpeed : runMin
+        if (!fast) return endBase
         const boostMs = (lens[c] - brakeCm) / cmPerMs
-        return control.millis() - segT < boostMs ? fastSpeed : runMin
+        return control.millis() - segT < boostMs ? fastSpeed : endBase
     }
 
     function rampTo(cur: number, target: number): number {
         return target <= cur ? target : Math.min(target, cur + RAMP)
     }
 
-    function follow(n: number, lens: number[], stopAtEnd: boolean = true): boolean {
+    function follow(n: number, lens: number[], stopAtEnd: boolean = true, endBase: number = -1): boolean {
+        if (endBase < 0) endBase = runMin
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
@@ -204,7 +206,7 @@ namespace PTKidsMission {
                 segT = control.millis()
             } else {
                 if (on >= 1 && on <= 3) clear++   // only a counted crossing resets it
-                base = rampTo(base, segmentBase(c, n, lens, segT))
+                base = rampTo(base, segmentBase(c, n, lens, segT, endBase))
                 pdStepAt(base, Math.max(runMax, base))
             }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
@@ -356,9 +358,12 @@ namespace PTKidsMission {
         }
         const toBox = kd == MissionNav.K_BOX
         const slow = Math.min(approachSpeed, runMin)
-        if (toBox && boxStopAtCrossing && pass == 0) {
-            // already standing on the crossing right before the box
+        if (toBox && boxStopAtCrossing) {
+            // stop on the crossing right before the box: drive there like any stop crossing,
+            // fast where possible, braking to the approach speed on the last segment
+            if (pass > 0 && !follow(pass, lens, true, slow)) return false
             PTKidsBITRobot.motorStop()
+            showWhy(0)
             nudge(arriveBoxMs)
             return true
         }
@@ -385,12 +390,6 @@ namespace PTKidsMission {
             const boxRun = toBox && c >= pass
             if (on >= 5 && c < pass && ready) {
                 c++
-                if (toBox && boxStopAtCrossing && c >= pass) {
-                    PTKidsBITRobot.motorStop()
-                    showWhy(0)
-                    nudge(arriveBoxMs)
-                    return true
-                }
                 if (!leaveWideAt(slowRun ? slow : Math.max(runMin, base))) return false
                 clear = leftOnLine()
                 if (c >= pass) tLast = control.millis()
