@@ -45,10 +45,7 @@ namespace PTKidsMission {
     const RAMP = 5           // base speed step per loop when speeding up
     let gripHoldMs = 250     // wait after closing before driving off
     let gripReleaseMs = 200  // wait after opening before driving off
-    let boxStopAtCrossing = false
-    // per-box forward time after stopping on the crossing (box index 0 UL … 7 B2); used where set
-    let boxArriveMs = [0, 0, 0, 0, 0, 0, 0, 0]
-    let boxArriveSet = [false, false, false, false, false, false, false, false]   // stop on the crossing right before a box (gripper reaches the box from there)
+    let boxStopAtCrossing = false   // stop on the crossing right before a box (gripper reaches the box from there)
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
@@ -60,8 +57,6 @@ namespace PTKidsMission {
     let gripOpen = 180
     let gripClose = 0
     const SERVO_MS = 300
-    let smoothTurn = false          // turns without stopping on the crossing or after the spin
-    let pendingArm = false          // lower the arm during the next spin (turn into a colour zone)
     let lowerArmBeforeZone = true   // lower the arm on the crossing before the white/black zone
 
     const FOLLOW_TIMEOUT = 8000
@@ -166,19 +161,18 @@ namespace PTKidsMission {
 
     /** follow the line and stop on the n-th crossing */
     /** base speed for this moment: fast on segments that are only passed, braking on the last one */
-    function segmentBase(c: number, n: number, lens: number[], segT: number, endBase: number): number {
-        const fast = fastSpeed > runMin && c < lens.length
-        if (c < n - 1) return fast ? fastSpeed : runMin
-        if (!fast) return endBase
+    function segmentBase(c: number, n: number, lens: number[], segT: number): number {
+        if (fastSpeed <= runMin || c >= lens.length) return runMin
+        if (c < n - 1) return fastSpeed
         const boostMs = (lens[c] - brakeCm) / cmPerMs
-        return control.millis() - segT < boostMs ? fastSpeed : endBase
+        return control.millis() - segT < boostMs ? fastSpeed : runMin
     }
 
     function rampTo(cur: number, target: number): number {
         return target <= cur ? target : Math.min(target, cur + RAMP)
     }
 
-    function follow(n: number, lens: number[], stopAtEnd: boolean, endBase: number): boolean {
+    function follow(n: number, lens: number[]): boolean {
         if (!leaveWide()) return false
         prevError = 0
         let c = 0
@@ -186,12 +180,10 @@ namespace PTKidsMission {
         const t = control.millis()
         let segT = t
         let base = runMin
-        let fourReads = 0   // a crossing crossed at an angle (fast) may only ever light 4 sensors
         while (true) {
             readSensors()
             const on = countOn()
-            fourReads = on >= 4 ? fourReads + 1 : 0
-            if ((isWide() || fourReads >= 2) && clear >= CLEAR_READS) {
+            if (isWide() && clear >= CLEAR_READS) {
                 // learn the real speed on a segment driven fast from end to end (not the first: it starts from rest)
                 if (fastSpeed > runMin && c >= 1 && c < n - 1 && c < lens.length) {
                     // cm per ms; a real robot runs about 0.03–0.15 (30–150 cm/s)
@@ -200,17 +192,13 @@ namespace PTKidsMission {
                     speedLearned = true
                 }
                 c++
-                if (c >= n) {
-                    if (stopAtEnd) PTKidsBITRobot.motorStop()
-                    else PTKidsBITRobot.motorGo(runMin, runMin)   // roll on into the turn at base speed
-                    return true
-                }
+                if (c >= n) { PTKidsBITRobot.motorStop(); return true }
                 if (!leaveWideAt(base)) return false
                 clear = leftOnLine()
                 segT = control.millis()
             } else {
                 if (on >= 1 && on <= 3) clear++   // only a counted crossing resets it
-                base = rampTo(base, segmentBase(c, n, lens, segT, endBase))
+                base = rampTo(base, segmentBase(c, n, lens, segT))
                 pdStepAt(base, Math.max(runMax, base))
             }
             if (control.millis() - t > FOLLOW_TIMEOUT) return false
@@ -219,19 +207,12 @@ namespace PTKidsMission {
 
     /** spin (dir 0 = left, 1 = right) blind for blindMs, then until a centre sensor sees a line */
     //% blockHidden=true
-    export function spinToLine(dir: number, speed: number, blindMs: number): boolean { return spin(dir, speed, blindMs, true) }
+    export function spinToLine(dir: number, speed: number, blindMs: number): boolean { return spin(dir, speed, blindMs) }
 
-    function spin(dir: number, speed: number, blindMs: number, stopAtEnd: boolean): boolean {
+    function spin(dir: number, speed: number, blindMs: number): boolean {
         const l = dir == 0 ? -speed : speed
         PTKidsBITRobot.motorGo(l, -l)
-        const tb = control.millis()
-        if (pendingArm) {
-            // lower the arm while already spinning (the servo write itself takes ~100 ms on board V1)
-            pendingArm = false
-            PTKidsBITRobot.servoWrite(armServo, armDown)
-        }
-        const left = blindMs - (control.millis() - tb)
-        if (left > 0) basic.pause(left)
+        basic.pause(blindMs)
         const t = control.millis()
         // phase 1: leave the line the centre sensors may still be on
         while (true) {
@@ -244,10 +225,7 @@ namespace PTKidsMission {
         while (true) {
             readSensors()
             position()   // keep "which side the line was last seen" fresh for the line follower
-            if (centerOnLine()) {
-                if (stopAtEnd) PTKidsBITRobot.motorStop()
-                return true
-            }
+            if (centerOnLine()) { PTKidsBITRobot.motorStop(); return true }
             PTKidsBITRobot.motorGo(l, -l)
             if (control.millis() - t > SPIN_TIMEOUT) return false
         }
@@ -272,18 +250,12 @@ namespace PTKidsMission {
                 PTKidsBITRobot.motorGo(runMin, runMin)
                 if (control.millis() - t > 1000) break   // missed it: turn from here rather than run away
             }
-            if (smoothTurn) roll(sideFwdMs)
-            else { PTKidsBITRobot.motorStop(); nudge(sideFwdMs) }
-        } else if (smoothTurn) roll(turnFwdMs)
-        else nudge(turnFwdMs)
-        return spin(dir, turnSpeed, turnBlindMs, !smoothTurn)
-    }
-
-    /** keep driving forward ms at the base speed without stopping afterwards */
-    function roll(ms: number): void {
-        if (ms <= 0) return
-        PTKidsBITRobot.motorGo(runMin, runMin)
-        basic.pause(ms)
+            PTKidsBITRobot.motorStop()
+            nudge(sideFwdMs)
+        } else {
+            nudge(turnFwdMs)
+        }
+        return spin(dir, turnSpeed, turnBlindMs)
     }
 
     /**
@@ -298,48 +270,6 @@ namespace PTKidsMission {
             PTKidsBITRobot.motorGo(-runMin, -runMin)
             if (control.millis() - t > 3000) return false
         }
-    }
-
-    /**
-     * after gripping in "stop on the crossing" mode: the robot crept forward past the crossing.
-     * Reverse until the front sensors are on that crossing again, so the side sensors are behind it
-     * for the turn (a fixed-time reverse can leave them past the line after the stop overshoot).
-     */
-    function backOntoBoxCrossing(): boolean {
-        // always: the robot slides past the crossing when it stops, whatever the Box time is.
-        // Reversing a little too far is harmless (the turn drives forward to the line again).
-        const v = Math.min(runMin, approachSpeed)
-        if (sideTurn && sideCalibrated()) {
-            // the side sensors decide where the turn happens: after gripping they are usually past the
-            // crossing line. Reverse until one of them is on it again (front sensors can't tell the
-            // crossing from the box square's edge). Short cap: never far enough to reach the next crossing.
-            const t0 = control.millis()
-            const cap = Math.max(0, boxMsFor(curNode)) * runMin / v * 1.5 + 250
-            while (!sideOnLine()) {
-                PTKidsBITRobot.motorGo(-v, -v)
-                if (control.millis() - t0 > cap) break
-            }
-            PTKidsBITRobot.motorStop()
-            return true
-        }
-        // already on the crossing (small Box time): stay. Reversing from here would reach the NEXT crossing.
-        readSensors()
-        if (countOn() >= 4) { PTKidsBITRobot.motorStop(); return true }
-        // short cap: the crossing is only a few cm behind; never far enough to reach the next one
-        const limit = Math.max(0, boxMsFor(curNode)) * runMin / v * 1.5 + 250
-        const t = control.millis()
-        let lineReads = 0
-        while (true) {
-            readSensors()
-            const on = countOn()
-            // the stub line between box and crossing (not white: the inside of the box square is white too)
-            if (on >= 1 && on <= 3) lineReads++
-            else if (on >= 4 && lineReads >= 2) break        // 4+ sensors after the stub line: the crossing
-            PTKidsBITRobot.motorGo(-v, -v)
-            if (control.millis() - t > limit) break          // not found: turn from here
-        }
-        PTKidsBITRobot.motorStop()
-        return true
     }
 
     /**
@@ -376,7 +306,7 @@ namespace PTKidsMission {
     function uturn(kind: number): boolean {
         // START / zone: come back to the frame edge first, then spin like on a crossing
         if (kind == MissionNav.K_ZONE && !backToCrossing(0)) return false
-        return spin(1, uturnSpeed, uturnBlindMs, true)
+        return spin(1, uturnSpeed, uturnBlindMs)
     }
 
     /** from inside START / a zone, drive out across the frame edge onto the line */
@@ -404,13 +334,10 @@ namespace PTKidsMission {
         }
         const toBox = kd == MissionNav.K_BOX
         const slow = Math.min(approachSpeed, runMin)
-        if (toBox && boxStopAtCrossing) {
-            // stop on the crossing right before the box: drive there like any stop crossing,
-            // fast where possible, braking to the approach speed on the last segment
-            if (pass > 0 && !follow(pass, lens, true, slow)) return false
+        if (toBox && boxStopAtCrossing && pass == 0) {
+            // already standing on the crossing right before the box
             PTKidsBITRobot.motorStop()
-            showWhy(0)
-            nudge(boxMsFor(goalNode))
+            nudge(arriveBoxMs)
             return true
         }
         // into a box with nothing to pass: slow from the start
@@ -436,6 +363,12 @@ namespace PTKidsMission {
             const boxRun = toBox && c >= pass
             if (on >= 5 && c < pass && ready) {
                 c++
+                if (toBox && boxStopAtCrossing && c >= pass) {
+                    PTKidsBITRobot.motorStop()
+                    showWhy(0)
+                    nudge(arriveBoxMs)
+                    return true
+                }
                 if (!leaveWideAt(slowRun ? slow : Math.max(runMin, base))) return false
                 clear = leftOnLine()
                 if (c >= pass) tLast = control.millis()
@@ -527,19 +460,18 @@ namespace PTKidsMission {
             if (op == MissionNav.OP_TURN && gripOn && nextIsBox) ok = turnIntoBox(arg)
             else if (op == MissionNav.OP_UTURN) ok = uturn(arg)
             else if (op == MissionNav.OP_EXIT) ok = exitZone()
-            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens, !(smoothTurn && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN), runMin)
+            else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens)
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
-            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
+            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) nudge(-arriveBoxMs)
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
-            if (!ok) { pendingArm = false; return false }
+            if (!ok) return false
             if (i == armAt) {
-                // on the crossing just before the colour zone: lower the box during the turn into it
-                if (i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) pendingArm = true
-                else PTKidsBITRobot.servoWrite(armServo, armDown)
+                // stopped on the crossing just before the colour zone: lower the box now
+                PTKidsBITRobot.servoWrite(armServo, armDown)
+                basic.pause(SERVO_MS)
             }
         }
-        if (pendingArm) { pendingArm = false; PTKidsBITRobot.servoWrite(armServo, armDown) }
         return true
     }
 
@@ -734,17 +666,6 @@ namespace PTKidsMission {
         brakeCm = cm
     }
 
-    /**
-     * เลี้ยวแบบไม่หยุด: วิ่งเข้าแยกแล้วหมุนต่อทันที หมุนเจอเส้นแล้ววิ่งตามเส้นต่อเลย
-     * (ปิด = หยุดบนแยก หยุดก่อนหมุน และหยุดหลังหมุน แบบเดิม)
-     */
-    //% block="เลี้ยวแบบไม่หยุด $on"
-    //% on.defl=true
-    //% group="ตั้งค่า" weight=97
-    export function setSmoothTurn(on: boolean): void {
-        smoothTurn = on
-    }
-
     /** ความเร็วจริงที่หุ่นวัดได้ตอนวิ่งเร็ว (ซม./วินาที) */
     //% block="ความเร็ววิ่งเร็วที่วัดได้ (ซม./วินาที)"
     //% group="ตั้งค่า" weight=98
@@ -767,26 +688,6 @@ namespace PTKidsMission {
     export function setGripTiming(holdMs: number, releaseMs: number): void {
         gripHoldMs = holdMs
         gripReleaseMs = releaseMs
-    }
-
-    /**
-     * ระยะเดินหน้าเข้ากล่องเฉพาะจุด (ใช้กับ "หยุดที่แยกก่อนถึง Box") แทนค่า Box ของ ตั้งค่าการเข้าจุดปลายทาง
-     * UL/DL อยู่ห่างแยกราว 10 ซม. ส่วน UR/DR/T1/T2/B1/B2 ราว 8 ซม. จึงควรใช้เวลาน้อยกว่า
-     */
-    //% block="ตั้งค่าเดินหน้าเข้ากล่องที่ $spot $ms ms"
-    //% spot.defl=MissionPoint.UR
-    //% group="ตั้งค่า" weight=27
-    export function setBoxArrive(spot: MissionPoint, ms: number): void {
-        const i = spot - MissionPoint.UL
-        if (i < 0 || i >= 8) return
-        boxArriveMs[i] = ms
-        boxArriveSet[i] = true
-    }
-
-    /** ให้ทุกกล่องกลับไปใช้ค่า Box เดียวกัน */
-    //% blockHidden=true
-    export function clearBoxArrive(): void {
-        for (let i = 0; i < 8; i++) boxArriveSet[i] = false
     }
 
     /**
@@ -891,13 +792,6 @@ namespace PTKidsMission {
         }
     }
 
-    /** forward time for a box node (its own value if set, else the common Box time) */
-    function boxMsFor(node: number): number {
-        const i = node - MissionNav.UL
-        if (i >= 0 && i < 8 && boxArriveSet[i]) return boxArriveMs[i]
-        return arriveBoxMs
-    }
-
     /** short rising tune: colours entered, ready to start */
     function playDoneTune(): void {
         const notes = [523, 659, 784, 1047]   // C5 E5 G5 C6
@@ -924,8 +818,6 @@ namespace PTKidsMission {
             }
             if (colorsReady()) {
                 showColors()
-                // work out the box order now (slow the first time), so pressing B drives off at once
-                MissionNav.bestOrder(boxColor.slice(), 0)
                 playDoneTune()
                 basic.pause(1000)
                 return

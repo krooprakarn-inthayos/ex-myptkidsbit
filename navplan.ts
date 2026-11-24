@@ -28,7 +28,6 @@ namespace MissionNav {
 
     let lastHeading = 0
     let lastCostVal = 0
-    export let planCalls = 0   // how many routes were planned (for tests: planning is slow on a micro:bit)
     // boxes still on the field (bit i = UL, DL, T1, B1, UR, DR, T2, B2): never turn on a crossing next to one
     let presentMask = 0
 
@@ -71,7 +70,6 @@ namespace MissionNav {
     }
 
     function planOnce(start: number, heading: number, goal: number): number[] {
-        planCalls++
         const acts: number[] = []
         lastHeading = heading
         lastCostVal = 0
