@@ -18,51 +18,51 @@ namespace PTKidsMission {
     let curNode = MissionNav.S
     let curHeading = 0
 
-    // ---- settings (defaults from the plan) ----
-    let runMin = 30
-    let runMax = 60
-    let runKP = 0.05
-    let runKD = 0.1
-    let turnSpeed = 50
-    let turnBlindMs = 150
+    // ---- settings: power-on values = the tuned competition set (keep in step with resetSettings) ----
+    let runMin = 60
+    let runMax = 100
+    let runKP = 0.046
+    let runKD = 0.25
+    let turnSpeed = 60
+    let turnBlindMs = 125
     let turnFwdMs = 120
-    let uturnSpeed = 50
-    let uturnBlindMs = 350
+    let uturnSpeed = 60
+    let uturnBlindMs = 290
     let uturnBackMs = 150
-    let arriveBoxMs = 0
-    let arriveStartMs = 300   // START: drive fully into the frame
+    let arriveBoxMs = 40
+    let arriveStartMs = 250   // START: drive fully into the frame
     let arriveZoneMs = 0      // white / black zone: stop at the frame edge
     let goalNode = -1
-    let arriveYellowMs = 250
-    let approachSpeed = 30    // last segment into a box (from its second-last crossing)
+    let arriveYellowMs = 50
+    let approachSpeed = 40    // last segment into a box (from its second-last crossing)
     let approachStopMs = 0    // > 0: stop this long after the last crossing before a box
     let showStopReason = false
-    let zoneBackSpeed = 0    // > 0: speed reversing out of a colour zone / START (0 = min(runMin, approach))
-    let crossSpeed = 0       // > 0: speed for timed moves and for approaching a stop/turn crossing (0 = runMin)
-    let fastSpeed = 0        // > runMin: base speed on straights between crossings (0 = off)
-    let brakeCm = 10         // slow to runMin this far before the crossing where the robot stops
+    let zoneBackSpeed = 65    // > 0: speed reversing out of a colour zone / START (0 = min(runMin, approach))
+    let crossSpeed = 50       // > 0: speed for timed moves and for approaching a stop/turn crossing (0 = runMin)
+    let fastSpeed = 100        // > runMin: base speed on straights between crossings (0 = off)
+    let brakeCm = 14         // slow to runMin this far before the crossing where the robot stops
     const CMPMS_START = 0.15 // 150 cm/s: assumed speed before any measurement (high = brakes early, safe)
     let cmPerMs = CMPMS_START // learned travel speed at fastSpeed, in cm per millisecond
     let speedLearned = false
     const RAMP = 5           // base speed step per loop when speeding up
-    let gripHoldMs = 250     // wait after closing before driving off
-    let gripReleaseMs = 200  // wait after opening before driving off
-    let boxStopAtCrossing = false
+    let gripHoldMs = 100     // wait after closing before driving off
+    let gripReleaseMs = 50  // wait after opening before driving off
+    let boxStopAtCrossing = true
     // per-box forward time after stopping on the crossing (box index 0 UL … 7 B2); used where set
     let boxArriveMs = [0, 0, 0, 0, 0, 0, 0, 0]
-    let boxArriveSet = [false, false, false, false, false, false, false, false]   // stop on the crossing right before a box (gripper reaches the box from there)
+    let boxArriveSet = [false, false, false, false, true, true, false, false]   // UR, DR: 0 ms (closer to their crossing)   // stop on the crossing right before a box (gripper reaches the box from there)
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
     let gripOn = false
     let armServo = Servo_Write.P8
-    let armUp = 90
-    let armDown = 0
+    let armUp = 24
+    let armDown = 110
     let gripServo = Servo_Write.P12
     let gripOpen = 180
     let gripClose = 0
     const SERVO_MS = 300
-    let smoothTurn = false          // turns without stopping on the crossing or after the spin
+    let smoothTurn = true          // turns without stopping on the crossing or after the spin
     let pendingArm = false          // lower the arm during the next spin (turn into a colour zone)
     let lowerArmBeforeZone = true   // lower the arm on the crossing before the white/black zone
 
@@ -625,7 +625,7 @@ namespace PTKidsMission {
      * ค่าวิ่งตามเส้นที่บล็อคนำทางใช้
      */
     //% block="ตั้งค่าการวิ่ง ความเร็วต่ำสุด $min สูงสุด $max KP $kp KD $kd"
-    //% min.defl=30 max.defl=60 kp.defl=0.05 kd.defl=0.1
+    //% min.defl=60 max.defl=100 kp.defl=0.046 kd.defl=0.25
     //% min.min=0 min.max=100 max.min=0 max.max=100
     //% group="ตั้งค่า" weight=60 inlineInputMode=inline
     export function setRun(min: number, max: number, kp: number, kd: number): void {
@@ -636,7 +636,7 @@ namespace PTKidsMission {
      * ค่าเลี้ยว 90° ที่แยก
      */
     //% block="ตั้งค่าการเลี้ยว ความเร็ว $speed เวลาหมุนเร็ว $blindMs ms เดินหน้าก่อนเลี้ยว $fwdMs ms"
-    //% speed.defl=50 blindMs.defl=150 fwdMs.defl=120
+    //% speed.defl=60 blindMs.defl=125 fwdMs.defl=120
     //% speed.min=0 speed.max=100
     //% group="ตั้งค่า" weight=50 inlineInputMode=inline
     export function setTurn(speed: number, blindMs: number, fwdMs: number): void {
@@ -648,7 +648,7 @@ namespace PTKidsMission {
      * backMs = ช่วงแรกของการถอยที่ไม่นับขอบกรอบ Box (กันหยุดผิดที่ขอบกรอบ)
      */
     //% block="ตั้งค่ากลับหัว ความเร็ว $speed เวลาหมุนเร็ว $blindMs ms ถอยออกจาก Box ไม่นับขอบกรอบช่วงแรก $backMs ms"
-    //% speed.defl=50 blindMs.defl=350 backMs.defl=150
+    //% speed.defl=60 blindMs.defl=290 backMs.defl=150
     //% speed.min=0 speed.max=100
     //% group="ตั้งค่า" weight=40 inlineInputMode=inline
     export function setUturn(speed: number, blindMs: number, backMs: number): void {
@@ -659,7 +659,7 @@ namespace PTKidsMission {
      * เวลาเดินต่อหลังหยุดที่ปลายทาง (ค่าติดลบ = ถอยกลับ)
      */
     //% block="ตั้งค่าการเข้าจุดปลายทาง Box $boxMs ms START $startMs ms Box เหลือง $yellowMs ms"
-    //% boxMs.defl=0 startMs.defl=300 yellowMs.defl=250
+    //% boxMs.defl=40 startMs.defl=250 yellowMs.defl=50
     //% group="ตั้งค่า" weight=30 inlineInputMode=inline
     export function setArrive(boxMs: number, startMs: number, yellowMs: number): void {
         arriveBoxMs = boxMs; arriveStartMs = startMs; arriveYellowMs = yellowMs
@@ -703,11 +703,11 @@ namespace PTKidsMission {
      * แล้วลดแขน+อ้ามือจับ ก่อนวิ่งเข้าหา Box (กันกริปเปอร์กวาดชนกล่อง)
      */
     //% block="ตั้งค่ากริปเปอร์ แขน $arm ยกขึ้น $up ลดลง $down มือจับ $grip อ้า $open หนีบ $close"
-    //% arm.defl=Servo_Write.P8 up.defl=90 down.defl=0 grip.defl=Servo_Write.P12 open.defl=180 close.defl=0
+    //% arm.defl=Servo_Write.P8 up.defl=24 down.defl=110 grip.defl=Servo_Write.P12 open.defl=180 close.defl=0
     //% up.min=0 up.max=180 down.min=0 down.max=180 open.min=0 open.max=180 close.min=0 close.max=180
     //% group="ภารกิจอัตโนมัติ" weight=10 inlineInputMode=inline
     //% up.min=0 up.max=180 down.min=0 down.max=180 open.min=0 open.max=180 close.min=0 close.max=180
-    //% arm.defl=Servo_Write.P8 grip.defl=Servo_Write.P12 up.defl=90 down.defl=0 open.defl=180 close.defl=0
+    //% arm.defl=Servo_Write.P8 grip.defl=Servo_Write.P12 up.defl=24 down.defl=110 open.defl=180 close.defl=0
     export function setGripper(arm: Servo_Write, up: number, down: number, grip: Servo_Write, open: number, close: number): void {
         armServo = arm; armUp = up; armDown = down
         lastArm = -1; lastGrip = -1
@@ -727,7 +727,7 @@ namespace PTKidsMission {
      * ความเร็วช่วงสุดท้ายก่อนถึง Box (หลังผ่านแยกสุดท้าย) ยิ่งช้า ยิ่งหยุดแม่น ไม่ชนกล่อง
      */
     //% block="ตั้งค่าความเร็วเข้า Box $speed"
-    //% speed.defl=30 speed.min=10 speed.max=100
+    //% speed.defl=40 speed.min=10 speed.max=100
     //% group="ตั้งค่า" weight=28
     export function setApproach(speed: number): void {
         approachSpeed = speed
@@ -742,6 +742,57 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=27
     export function setApproachStop(ms: number): void {
         approachStopMs = ms
+    }
+
+    /**
+     * คืนค่าตั้งทั้งหมดเป็นชุดมาตรฐานสำหรับแข่ง (ชุดที่จูนแล้ว ทำภารกิจได้ราว 1:20–1:22)
+     * ค่าเหล่านี้ตั้งไว้แล้วตั้งแต่เปิดเครื่อง — ใช้บล็อคนี้เมื่อปรับค่าไปแล้วอยากกลับมาเริ่มใหม่
+     */
+    //% block="คืนค่าตั้งเริ่มต้นสำหรับแข่ง"
+    //% group="ตั้งค่า" weight=110
+    export function resetSettings(): void {
+        runMin = 60; runMax = 100; runKP = 0.046; runKD = 0.25
+        crossSpeed = 50; zoneBackSpeed = 65
+        fastSpeed = 100; brakeCm = 14
+        turnSpeed = 60; turnBlindMs = 125; turnFwdMs = 120
+        sideTurn = true; sideFwdMs = 100
+        uturnSpeed = 60; uturnBlindMs = 290; uturnBackMs = 150
+        approachSpeed = 40; approachStopMs = 0
+        arriveBoxMs = 40; arriveStartMs = 250; arriveYellowMs = 50; arriveZoneMs = 0
+        for (let i = 0; i < 8; i++) { boxArriveMs[i] = 0; boxArriveSet[i] = false }
+        boxArriveSet[4] = true; boxArriveSet[5] = true          // UR, DR: 0 ms
+        armServo = Servo_Write.P8; armUp = 24; armDown = 110
+        gripServo = Servo_Write.P12; gripOpen = 180; gripClose = 0
+        lastArm = -1; lastGrip = -1
+        gripHoldMs = 100; gripReleaseMs = 50
+        smoothTurn = true; boxStopAtCrossing = true; lowerArmBeforeZone = true; showStopReason = false
+    }
+
+    //% blockHidden=true
+    export function settingsForTest(): number[] {
+        const b = (x: boolean) => x ? 1 : 0
+        return [runMin, runMax, runKP, runKD, crossSpeed, zoneBackSpeed, fastSpeed, brakeCm,
+            turnSpeed, turnBlindMs, turnFwdMs, b(sideTurn), sideFwdMs, uturnSpeed, uturnBlindMs, uturnBackMs,
+            approachSpeed, arriveBoxMs, arriveStartMs, arriveYellowMs, arriveZoneMs,
+            armUp, armDown, gripOpen, gripClose, gripHoldMs, gripReleaseMs,
+            b(smoothTurn), b(boxStopAtCrossing), b(lowerArmBeforeZone), b(showStopReason),
+            boxArriveSet[4] ? boxArriveMs[4] : -1, boxArriveSet[5] ? boxArriveMs[5] : -1]
+    }
+
+    /** the values the off-robot tests were written for (before the competition set) */
+    //% blockHidden=true
+    export function useLegacyDefaultsForTest(): void {
+        runMin = 30; runMax = 60; runKP = 0.05; runKD = 0.1
+        crossSpeed = 0; zoneBackSpeed = 0; fastSpeed = 0; brakeCm = 10
+        turnSpeed = 50; turnBlindMs = 150; turnFwdMs = 120; sideTurn = true; sideFwdMs = 100
+        uturnSpeed = 50; uturnBlindMs = 350; uturnBackMs = 150
+        approachSpeed = 30; approachStopMs = 0
+        arriveBoxMs = 0; arriveStartMs = 300; arriveYellowMs = 250; arriveZoneMs = 0
+        for (let i = 0; i < 8; i++) { boxArriveMs[i] = 0; boxArriveSet[i] = false }
+        armServo = Servo_Write.P8; armUp = 90; armDown = 0; gripServo = Servo_Write.P12; gripOpen = 180; gripClose = 0
+        lastArm = -1; lastGrip = -1
+        gripHoldMs = 250; gripReleaseMs = 200
+        smoothTurn = false; boxStopAtCrossing = false; lowerArmBeforeZone = true; showStopReason = false
     }
 
     /**
@@ -761,7 +812,7 @@ namespace PTKidsMission {
      * 0 = ใช้ค่าที่น้อยกว่าระหว่างความเร็วต่ำสุดกับความเร็วเข้า Box (แบบเดิม)
      */
     //% block="ตั้งค่าความเร็วถอยออกจากช่อง $speed"
-    //% speed.defl=50
+    //% speed.defl=65
     //% group="ตั้งค่า" weight=96
     export function setZoneBackSpeed(speed: number): void {
         zoneBackSpeed = speed
@@ -773,7 +824,7 @@ namespace PTKidsMission {
      * ความเร็ว 0 = ปิด · ควรตั้ง "สูงสุด" ใน ตั้งค่าการวิ่ง ให้มากกว่าความเร็วนี้ เพื่อให้มีแรงแก้เส้น
      */
     //% block="ตั้งค่าวิ่งเร็วทางตรง ความเร็ว $speed เบรกก่อนถึงแยก $cm ซม."
-    //% speed.defl=70 cm.defl=10
+    //% speed.defl=100 cm.defl=14
     //% group="ตั้งค่า" weight=99
     export function setFastRun(speed: number, cm: number): void {
         fastSpeed = speed
@@ -808,7 +859,7 @@ namespace PTKidsMission {
      * เวลารอของกริปเปอร์ในภารกิจอัตโนมัติ: หลังหนีบก่อนออกวิ่ง และหลังอ้าวางก่อนถอย (ms)
      */
     //% block="ตั้งค่าเวลากริปเปอร์ หนีบ $holdMs ms ปล่อย $releaseMs ms"
-    //% holdMs.defl=250 releaseMs.defl=200
+    //% holdMs.defl=100 releaseMs.defl=50
     //% group="ภารกิจอัตโนมัติ" weight=9
     export function setGripTiming(holdMs: number, releaseMs: number): void {
         gripHoldMs = holdMs
@@ -820,7 +871,7 @@ namespace PTKidsMission {
      * UL/DL อยู่ห่างแยกราว 10 ซม. ส่วน UR/DR/T1/T2/B1/B2 ราว 8 ซม. จึงควรใช้เวลาน้อยกว่า
      */
     //% block="ตั้งค่าเดินหน้าเข้ากล่องที่ $spot $ms ms"
-    //% spot.defl=MissionPoint.UR
+    //% spot.defl=MissionPoint.UR ms.defl=0
     //% group="ตั้งค่า" weight=27
     export function setBoxArrive(spot: MissionPoint, ms: number): void {
         const i = spot - MissionPoint.UL
@@ -851,7 +902,7 @@ namespace PTKidsMission {
      * แสดงเหตุผลที่หุ่นหยุดตอนถึงปลายทาง (ไฟแถวบนสุด): ซ้าย = เจอขอบกรอบ, กลาง = สุดปลายเส้น, ขวา = หมดเวลาเข้า Box
      */
     //% block="แสดงเหตุผลการหยุด $on"
-    //% on.defl=true
+    //% on.defl=false
     //% group="ตั้งค่า" weight=2
     export function setShowStopReason(on: boolean): void {
         showStopReason = on
