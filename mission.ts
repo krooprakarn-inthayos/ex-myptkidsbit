@@ -45,7 +45,10 @@ namespace PTKidsMission {
     const RAMP = 5           // base speed step per loop when speeding up
     let gripHoldMs = 250     // wait after closing before driving off
     let gripReleaseMs = 200  // wait after opening before driving off
-    let boxStopAtCrossing = false   // stop on the crossing right before a box (gripper reaches the box from there)
+    let boxStopAtCrossing = false
+    // per-box forward time after stopping on the crossing (box index 0 UL … 7 B2); used where set
+    let boxArriveMs = [0, 0, 0, 0, 0, 0, 0, 0]
+    let boxArriveSet = [false, false, false, false, false, false, false, false]   // stop on the crossing right before a box (gripper reaches the box from there)
     let sideTurn = true       // use ADC6/ADC7 to find the wheel position before a 90° turn
     let sideFwdMs = 100       // drive on after a side sensor sees the crossing
     // gripper handling on the turn into a box (off until setGripper is used)
@@ -304,7 +307,7 @@ namespace PTKidsMission {
         // always: the robot slides past the crossing when it stops, whatever the Box time is.
         // Reversing a little too far is harmless (the turn drives forward to the line again).
         const v = Math.min(runMin, approachSpeed)
-        const limit = Math.max(0, arriveBoxMs) * runMin / v * 2 + 500
+        const limit = Math.max(0, boxMsFor(curNode)) * runMin / v * 2 + 500
         const t = control.millis()
         let lineReads = 0
         while (true) {
@@ -388,7 +391,7 @@ namespace PTKidsMission {
             if (pass > 0 && !follow(pass, lens, true, slow)) return false
             PTKidsBITRobot.motorStop()
             showWhy(0)
-            nudge(arriveBoxMs)
+            nudge(boxMsFor(goalNode))
             return true
         }
         // into a box with nothing to pass: slow from the start
@@ -748,6 +751,26 @@ namespace PTKidsMission {
     }
 
     /**
+     * ระยะเดินหน้าเข้ากล่องเฉพาะจุด (ใช้กับ "หยุดที่แยกก่อนถึง Box") แทนค่า Box ของ ตั้งค่าการเข้าจุดปลายทาง
+     * UL/DL อยู่ห่างแยกราว 10 ซม. ส่วน UR/DR/T1/T2/B1/B2 ราว 8 ซม. จึงควรใช้เวลาน้อยกว่า
+     */
+    //% block="ตั้งค่าเดินหน้าเข้ากล่องที่ $spot $ms ms"
+    //% spot.defl=MissionPoint.UR
+    //% group="ตั้งค่า" weight=27
+    export function setBoxArrive(spot: MissionPoint, ms: number): void {
+        const i = spot - MissionPoint.UL
+        if (i < 0 || i >= 8) return
+        boxArriveMs[i] = ms
+        boxArriveSet[i] = true
+    }
+
+    /** ให้ทุกกล่องกลับไปใช้ค่า Box เดียวกัน */
+    //% blockHidden=true
+    export function clearBoxArrive(): void {
+        for (let i = 0; i < 8; i++) boxArriveSet[i] = false
+    }
+
+    /**
      * หยุดที่แยกสุดท้ายก่อนถึง Box แทนการวิ่งไปหาขอบกรอบ Box
      * ใช้เมื่อกริปเปอร์ยื่นไปข้างหน้าไกล (วิ่งถึงขอบกรอบแล้วกริปเปอร์ชนกล่อง)
      * ปรับระยะต่อด้วย "ตั้งค่าการเข้าจุดปลายทาง Box … ms" (บวก = เดินหน้าต่อ, ลบ = ถอย)
@@ -847,6 +870,13 @@ namespace PTKidsMission {
             }
             basic.pause(20)
         }
+    }
+
+    /** forward time for a box node (its own value if set, else the common Box time) */
+    function boxMsFor(node: number): number {
+        const i = node - MissionNav.UL
+        if (i >= 0 && i < 8 && boxArriveSet[i]) return boxArriveMs[i]
+        return arriveBoxMs
     }
 
     /** short rising tune: colours entered, ready to start */
