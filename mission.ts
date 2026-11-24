@@ -186,10 +186,12 @@ namespace PTKidsMission {
         const t = control.millis()
         let segT = t
         let base = runMin
+        let fourReads = 0   // a crossing crossed at an angle (fast) may only ever light 4 sensors
         while (true) {
             readSensors()
             const on = countOn()
-            if (isWide() && clear >= CLEAR_READS) {
+            fourReads = on >= 4 ? fourReads + 1 : 0
+            if ((isWide() || fourReads >= 2) && clear >= CLEAR_READS) {
                 // learn the real speed on a segment driven fast from end to end (not the first: it starts from rest)
                 if (fastSpeed > runMin && c >= 1 && c < n - 1 && c < lens.length) {
                     // cm per ms; a real robot runs about 0.03–0.15 (30–150 cm/s)
