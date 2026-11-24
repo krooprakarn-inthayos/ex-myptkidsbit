@@ -1045,6 +1045,35 @@ namespace PTKidsBITRobot {
         }
     }
 
+    /**
+     * same as servoWrite, without the 100 ms wait (the servo keeps moving while the program goes on)
+     */
+    //% blockHidden=true
+    export function servoWriteNoWait(servo: Servo_Write, degree: number): void {
+        if (Read_Servo_Version == false) {
+            servoWrite(servo, degree)   // first call: detects the board version (waits once)
+            return
+        }
+        if (servo == Servo_Write.P8) {
+            if (Servo_Version == 1) {
+                Servo_8_Enable = 1
+                Servo_8_Degree = degree
+                pins.servoWritePin(AnalogPin.P8, Servo_8_Degree)
+                pins.servoWritePin(AnalogPin.P12, Servo_12_Degree)
+            }
+            else setServoPCA(1, degree)
+        }
+        else if (servo == Servo_Write.P12) {
+            if (Servo_Version == 1) {
+                Servo_12_Enable = 1
+                Servo_12_Degree = degree
+                pins.servoWritePin(AnalogPin.P8, Servo_8_Degree)
+                pins.servoWritePin(AnalogPin.P12, Servo_12_Degree)
+            }
+            else setServoPCA(0, degree)
+        }
+    }
+
     //% group="Sensor and ADC"
     /**
      * Read Analog from ADC Channel

@@ -37,6 +37,7 @@ namespace PTKidsMission {
     let approachSpeed = 30    // last segment into a box (from its second-last crossing)
     let approachStopMs = 0    // > 0: stop this long after the last crossing before a box
     let showStopReason = false
+    let zoneBackSpeed = 0    // > 0: speed reversing out of a colour zone / START (0 = min(runMin, approach))
     let crossSpeed = 0       // > 0: speed for timed moves and for approaching a stop/turn crossing (0 = runMin)
     let fastSpeed = 0        // > runMin: base speed on straights between crossings (0 = off)
     let brakeCm = 10         // slow to runMin this far before the crossing where the robot stops
@@ -229,7 +230,7 @@ namespace PTKidsMission {
         if (pendingArm) {
             // lower the arm while already spinning (the servo write itself takes ~100 ms on board V1)
             pendingArm = false
-            PTKidsBITRobot.servoWrite(armServo, armDown)
+            servoNow(armServo, armDown)
         }
         const left = blindMs - (control.millis() - tb)
         if (left > 0) basic.pause(left)
@@ -278,6 +279,19 @@ namespace PTKidsMission {
         } else if (smoothTurn) roll(turnFwdMs)
         else nudge(turnFwdMs)
         return spin(dir, turnSpeed, turnBlindMs, !smoothTurn)
+    }
+
+    // last angle written to each servo by this extension (-1 = unknown): identical writes are skipped
+    let lastArm = -1
+    let lastGrip = -1
+
+    /** move a servo without waiting (the board V1 servo block waits 100 ms every time) */
+    function servoNow(sv: Servo_Write, deg: number): void {
+        const isArm = sv == armServo
+        if (isArm ? lastArm == deg : lastGrip == deg) return
+        PTKidsBITRobot.servoWriteNoWait(sv, deg)
+        if (isArm) lastArm = deg
+        else lastGrip = deg
     }
 
     /** speed for timed moves (nudges, roll before a spin, side-sensor search) and the last bit before a crossing */
@@ -352,7 +366,8 @@ namespace PTKidsMission {
      */
     function backOutOfZone(): boolean {
         const t = control.millis()
-        const v = Math.min(runMin, approachSpeed)   // reverse slowly: easier to keep the line
+        // reverse slowly by default (easier to keep the line); setZoneBackSpeed overrides it
+        const v = zoneBackSpeed > 0 ? zoneBackSpeed : Math.min(runMin, approachSpeed)
         let lineReads = 0
         let tLine = t
         prevError = 0
@@ -492,13 +507,13 @@ namespace PTKidsMission {
      * lift + close, turn, back the sensors onto the crossing, then lower + open before driving in.
      */
     function turnIntoBox(dir: number): boolean {
-        PTKidsBITRobot.servoWrite(armServo, armUp)
-        PTKidsBITRobot.servoWrite(gripServo, gripClose)
+        servoNow(armServo, armUp)
+        servoNow(gripServo, gripClose)
         basic.pause(SERVO_MS)
         if (!turn(dir)) return false
         const ok = backToCrossing(0)
-        PTKidsBITRobot.servoWrite(armServo, armDown)
-        PTKidsBITRobot.servoWrite(gripServo, gripOpen)
+        servoNow(armServo, armDown)
+        servoNow(gripServo, gripOpen)
         basic.pause(SERVO_MS)
         return ok
     }
@@ -540,10 +555,10 @@ namespace PTKidsMission {
             if (i == armAt) {
                 // on the crossing just before the colour zone: lower the box during the turn into it
                 if (i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) pendingArm = true
-                else PTKidsBITRobot.servoWrite(armServo, armDown)
+                else servoNow(armServo, armDown)
             }
         }
-        if (pendingArm) { pendingArm = false; PTKidsBITRobot.servoWrite(armServo, armDown) }
+        if (pendingArm) { pendingArm = false; servoNow(armServo, armDown) }
         return true
     }
 
@@ -692,6 +707,7 @@ namespace PTKidsMission {
     //% arm.defl=Servo_Write.P8 grip.defl=Servo_Write.P12 up.defl=90 down.defl=0 open.defl=180 close.defl=0
     export function setGripper(arm: Servo_Write, up: number, down: number, grip: Servo_Write, open: number, close: number): void {
         armServo = arm; armUp = up; armDown = down
+        lastArm = -1; lastGrip = -1
         gripServo = grip; gripOpen = open; gripClose = close
     }
 
@@ -735,6 +751,17 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=100
     export function setCrossingSpeed(speed: number): void {
         crossSpeed = speed
+    }
+
+    /**
+     * ความเร็วตอนถอยออกจากช่องขาว/ช่องดำ (ถอยตามเส้นจนถึงแยกหน้าช่อง)
+     * 0 = ใช้ค่าที่น้อยกว่าระหว่างความเร็วต่ำสุดกับความเร็วเข้า Box (แบบเดิม)
+     */
+    //% block="ตั้งค่าความเร็วถอยออกจากช่อง $speed"
+    //% speed.defl=50
+    //% group="ตั้งค่า" weight=96
+    export function setZoneBackSpeed(speed: number): void {
+        zoneBackSpeed = speed
     }
 
     /**
@@ -848,7 +875,7 @@ namespace PTKidsMission {
         return goToOk(p)
     }
 
-    function servo(s: Servo_Write, d: number): void { PTKidsBITRobot.servoWrite(s, d) }
+    function servo(s: Servo_Write, d: number): void { servoNow(s, d) }
 
     /** arm down + gripper open, ready to drive onto a box (moves while the robot drives there) */
     function gripReady(): void {
@@ -978,6 +1005,7 @@ namespace PTKidsMission {
             return
         }
         setPosition(MissionPoint.START)
+        lastArm = -1; lastGrip = -1   // the servos may have been moved by other blocks since
         const colors = boxColor.slice()
         const order = MissionNav.bestOrder(colors, doneMask)
         for (let k = 0; k < order.length; k++) {
