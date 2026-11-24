@@ -39,7 +39,9 @@ namespace PTKidsMission {
     let showStopReason = false
     let fastSpeed = 0        // > runMin: base speed on straights between crossings (0 = off)
     let brakeCm = 10         // slow to runMin this far before the crossing where the robot stops
-    let cmPerMs = 1.5        // learned travel speed at fastSpeed (starts high = brakes early, safe)
+    const CMPMS_START = 0.15 // 150 cm/s: assumed speed before any measurement (high = brakes early, safe)
+    let cmPerMs = CMPMS_START // learned travel speed at fastSpeed, in cm per millisecond
+    let speedLearned = false
     const RAMP = 5           // base speed step per loop when speeding up
     let gripHoldMs = 250     // wait after closing before driving off
     let gripReleaseMs = 200  // wait after opening before driving off
@@ -184,8 +186,10 @@ namespace PTKidsMission {
             if (isWide() && clear >= CLEAR_READS) {
                 // learn the real speed on a segment driven fast from end to end (not the first: it starts from rest)
                 if (fastSpeed > runMin && c >= 1 && c < n - 1 && c < lens.length) {
-                    const v = lens[c] / Math.max(1, control.millis() - segT)
-                    cmPerMs = Math.max(0.2, Math.min(2, (cmPerMs + v) / 2))
+                    // cm per ms; a real robot runs about 0.03–0.15 (30–150 cm/s)
+                    const v = Math.max(0.02, Math.min(0.3, lens[c] / Math.max(1, control.millis() - segT)))
+                    cmPerMs = speedLearned ? (cmPerMs + v) / 2 : v
+                    speedLearned = true
                 }
                 c++
                 if (c >= n) { PTKidsBITRobot.motorStop(); return true }
@@ -660,6 +664,19 @@ namespace PTKidsMission {
     export function setFastRun(speed: number, cm: number): void {
         fastSpeed = speed
         brakeCm = cm
+    }
+
+    /** ความเร็วจริงที่หุ่นวัดได้ตอนวิ่งเร็ว (ซม./วินาที) */
+    //% block="ความเร็ววิ่งเร็วที่วัดได้ (ซม./วินาที)"
+    //% group="ตั้งค่า" weight=98
+    export function learnedSpeed(): number {
+        return Math.round(cmPerMs * 1000)
+    }
+
+    //% blockHidden=true
+    export function resetLearnedSpeed(): void {
+        cmPerMs = CMPMS_START
+        speedLearned = false
     }
 
     /**
