@@ -361,6 +361,28 @@ namespace PTKidsMission {
     }
 
     /**
+     * leaving the yellow box: the stop bar is right behind it. Reverse until the short line has been
+     * seen and then stop on the first 4+ sensor read (the bar). A time-based "ignore" window reversed
+     * straight past the bar to J4, where the U-turn then caught the side line.
+     */
+    function backOntoStopBar(): boolean {
+        const v = Math.min(moveSpeed(), approachSpeed)
+        const cap = Math.max(0, arriveYellowMs) * moveSpeed() / v * 1.5 + 400
+        const t = control.millis()
+        let lineReads = 0
+        while (true) {
+            readSensors()
+            const on = countOn()
+            if (on >= 1 && on <= 3) lineReads++
+            else if (on >= 4 && lineReads >= 2) break
+            PTKidsBITRobot.motorGo(-v, -v)
+            if (control.millis() - t > cap) break
+        }
+        PTKidsBITRobot.motorStop()
+        return true
+    }
+
+    /**
      * reverse out of START / a zone: the frame edge is ignored until the plain line has been seen
      * for a few reads, then stop on the nearest crossing.
      */
@@ -550,6 +572,7 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
+            else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && MissionNav.kind(curNode) == MissionNav.K_YELLOW) ok = backOntoStopBar()
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
             if (!ok) { pendingArm = false; return false }
             if (i == armAt) {
@@ -992,7 +1015,7 @@ namespace PTKidsMission {
 
     /**
      * เริ่มภารกิจอัตโนมัติจาก START: หุ่นคำนวณลำดับที่เร็วที่สุดเอง
-     * หยิบกล่อง → ส่งเข้าช่องสีเดียวกัน ครบ 8 กล่อง แล้วนำกล่องเหลืองกลับ START
+     * หยิบกล่อง → ส่งเข้าช่องสีเดียวกัน ครบ 8 กล่อง แล้วนำกล่องเหลืองกลับ START (คีบค้างไว้ ไม่ปล่อย)
      * ถ้าพลาดกลางทาง หุ่นหยุด: RETRY วางหุ่นที่ START แล้วเรียกบล็อคนี้อีกครั้ง หุ่นทำต่อเฉพาะกล่องที่ยังไม่ส่ง
      */
     //% block="เริ่มภารกิจอัตโนมัติ"
@@ -1024,7 +1047,7 @@ namespace PTKidsMission {
         if (!drive(MissionPoint.Yellow)) return
         gripTake()
         if (!drive(MissionPoint.START)) return
-        gripDrop()
+        // finish holding the yellow box in START (no release)
         basic.showIcon(IconNames.Yes)
         music.playTone(988, 400)
     }
