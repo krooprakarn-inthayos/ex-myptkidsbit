@@ -852,6 +852,8 @@ namespace PTKidsMission {
             }
             if (colorsReady()) {
                 showColors()
+                // work out the box order now (slow the first time), so pressing B drives off at once
+                MissionNav.bestOrder(boxColor.slice(), 0)
                 playDoneTune()
                 basic.pause(1000)
                 return
