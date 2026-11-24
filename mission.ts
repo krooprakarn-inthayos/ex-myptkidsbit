@@ -364,7 +364,7 @@ namespace PTKidsMission {
      * reverse out of START / a zone: the frame edge is ignored until the plain line has been seen
      * for a few reads, then stop on the nearest crossing.
      */
-    function backOutOfZone(): boolean {
+    function backOutOfZone(stopOnSide: boolean): boolean {
         const t = control.millis()
         // reverse slowly by default (easier to keep the line); setZoneBackSpeed overrides it
         const v = zoneBackSpeed > 0 ? zoneBackSpeed : Math.min(runMin, approachSpeed)
@@ -378,6 +378,9 @@ namespace PTKidsMission {
             if (on >= 1 && on <= 3) { lineReads++; tLine = control.millis() }
             // the crossing in front of the zone: 4 sensors are enough (reversing at a slight angle)
             if (on >= 4 && lineReads >= 3) { PTKidsBITRobot.motorStop(); return true }
+            // a turn follows: the side sensors (behind the front ones) reach the crossing first —
+            // stop there, so the turn needs no drive forward to find the line again
+            if (stopOnSide && lineReads >= 3 && sideOnLine()) { PTKidsBITRobot.motorStop(); return true }
             // line lost after it was found: the crossing was missed, stop before running far off
             if (on == 0 && lineReads >= 3 && control.millis() - tLine > 300) { PTKidsBITRobot.motorStop(); return false }
             if (on >= 1 && on <= 3) {
@@ -550,7 +553,7 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
             else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
-            else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone() : backToCrossing(uturnBackMs)
+            else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone(sideTurn && sideCalibrated() && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) : backToCrossing(uturnBackMs)
             if (!ok) { pendingArm = false; return false }
             if (i == armAt) {
                 // on the crossing just before the colour zone: lower the box during the turn into it
