@@ -793,6 +793,7 @@ namespace PTKidsMission {
     //% group="ตั้งค่า" weight=110
     export function resetSettings(): void {
         runMin = 60; runMax = 100; runKP = 0.046; runKD = 0.25
+        retryBackOne = true
         crossSpeed = 50; zoneBackSpeed = 65
         fastSpeed = 100; brakeCm = 14
         turnSpeed = 60; turnBlindMs = 125; turnFwdMs = 120
@@ -825,6 +826,7 @@ namespace PTKidsMission {
     //% blockHidden=true
     export function useLegacyDefaultsForTest(): void {
         runMin = 30; runMax = 60; runKP = 0.05; runKD = 0.1
+        retryBackOne = false
         crossSpeed = 0; zoneBackSpeed = 0; fastSpeed = 0; brakeCm = 10
         turnSpeed = 50; turnBlindMs = 150; turnFwdMs = 120; sideTurn = true; sideFwdMs = 100
         uturnSpeed = 50; uturnBlindMs = 350; uturnBackMs = 150
@@ -1231,6 +1233,7 @@ namespace PTKidsMission {
     // ---- trip list: the order the kids write, run like the auto mission (stop on a miss, RETRY resumes) ----
     let tripBox: number[] = []     // box node per trip, in the written order
     let tripWhite: boolean[] = []  // true = to the white zone
+    let retryBackOne = true        // after a miss / stop, resume one trip earlier
     let tripsDoneCount = 0         // trips delivered; = length + 1 once the yellow box is back at START
 
     /** ล้างรายการเที่ยวทั้งหมด (ใส่ก่อน "เพิ่มเที่ยว") */
@@ -1268,6 +1271,9 @@ namespace PTKidsMission {
         missionRunning = true; stopRequested = false; swallowUndo = false
         tripsRun()
         missionRunning = false
+        // RETRY: step back one trip, so the trip before the miss is done again too
+        const n = tripBox.length
+        if (retryBackOne && n > 0 && tripsDoneCount <= n && calibrated()) tripsDoneCount = Math.max(0, tripsDoneCount - 1)
         PTKidsBITRobot.motorStop()
     }
 
@@ -1340,6 +1346,17 @@ namespace PTKidsMission {
             if (control.millis() - stopAt < 3000) return
         }
         tripsDoneCount = Math.max(0, Math.min(tripsDoneCount, tripBox.length) - 1)
+    }
+
+    /**
+     * เมื่อพลาดหรือกดหยุด ให้ย้อนกลับ 1 เที่ยว: กด "ทำต่อ" แล้วหุ่นเริ่มจากเที่ยวก่อนหน้าเที่ยวที่พลาด
+     * (วางกล่องของเที่ยวนั้นคืนที่เดิมด้วย) · เปิดไว้ตั้งแต่เริ่ม
+     */
+    //% block="RETRY ย้อนกลับ 1 เที่ยว $on"
+    //% on.defl=true
+    //% group="หยุด / ทำต่อ" weight=91
+    export function setRetryBackOne(on: boolean): void {
+        retryBackOne = on
     }
 
     /** หยุดหุ่นทันที (ใช้กับปุ่มอื่นได้ เช่น โลโก้) · ปกติปุ่ม A หยุดหุ่นขณะวิ่งให้อยู่แล้ว */
