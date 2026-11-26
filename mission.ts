@@ -12,7 +12,7 @@ enum BoxColor {
  * and its calibration arrays (Color_Line_All / Color_Background_All).
  */
 //% color="#E67E22" icon="" block="ภารกิจส่งด่วน" weight=95
-//% groups='["ภารกิจอัตโนมัติ", "เขียนเส้นทางเอง", "นำทาง", "ตั้งค่า"]'
+//% groups='["ภารกิจอัตโนมัติ", "เขียนเส้นทางเอง", "หยุด / ทำต่อ", "นำทาง", "ตั้งค่า"]'
 namespace PTKidsMission {
     // ---- where the robot thinks it is ----
     let curNode = MissionNav.S
@@ -79,7 +79,27 @@ namespace PTKidsMission {
     let prevError = 0
     let lastPos = 1500
 
+    // ---- stop button: A pressed while the robot drives stops it at once ----
+    let stopRequested = false
+    let moving = false            // inside a drive (goTo / mission step)
+    let missionRunning = false    // inside runTrips / startAutoMission
+    let stopButtonA = true
+    let swallowUndo = false       // the click of the A press that stopped the robot must not undo a trip
+    let stopAt = -100000
+
+    /** true once a stop was asked for; also polls button A while driving */
+    function pollStop(): boolean {
+        if (moving && !stopRequested && stopButtonA && input.buttonIsPressed(Button.A)) {
+            stopRequested = true
+            swallowUndo = true
+            stopAt = control.millis()
+        }
+        if (stopRequested) PTKidsBITRobot.motorStop()
+        return stopRequested
+    }
+
     function readSensors(): void {
+        pollStop()
         const ch = [ADC_Read.ADC0, ADC_Read.ADC1, ADC_Read.ADC2, ADC_Read.ADC3, ADC_Read.ADC4, ADC_Read.ADC5]
         for (let i = 0; i < 6; i++) {
             let v = pins.map(PTKidsBITRobot.ADCRead(ch[i]), Color_Line_All[i], Color_Background_All[i], 1000, 0)
@@ -157,7 +177,7 @@ namespace PTKidsMission {
             readSensors()
             if (!isWide()) return true
             PTKidsBITRobot.motorGo(v, v)
-            if (control.millis() - t > 1500) return false
+            if (stopRequested || control.millis() - t > 1500) return false
         }
     }
 
@@ -216,7 +236,7 @@ namespace PTKidsMission {
                 base = rampTo(base, segmentBase(c, n, lens, segT, endBase))
                 pdStepAt(base, Math.max(runMax, base))
             }
-            if (control.millis() - t > FOLLOW_TIMEOUT) return false
+            if (stopRequested || control.millis() - t > FOLLOW_TIMEOUT) return false
         }
     }
 
@@ -241,7 +261,7 @@ namespace PTKidsMission {
             readSensors()
             if (!centerOnLine()) break
             PTKidsBITRobot.motorGo(l, -l)
-            if (control.millis() - t > SPIN_TIMEOUT) return false
+            if (stopRequested || control.millis() - t > SPIN_TIMEOUT) return false
         }
         // phase 2: stop on the next line
         while (true) {
@@ -252,7 +272,7 @@ namespace PTKidsMission {
                 return true
             }
             PTKidsBITRobot.motorGo(l, -l)
-            if (control.millis() - t > SPIN_TIMEOUT) return false
+            if (stopRequested || control.millis() - t > SPIN_TIMEOUT) return false
         }
     }
 
@@ -271,10 +291,11 @@ namespace PTKidsMission {
         if (sideTurn && sideCalibrated()) {
             // drive on until a side sensor reaches the crossing, then a short fixed distance to the wheels
             const t = control.millis()
-            while (!sideOnLine()) {
+            while (!sideOnLine() && !pollStop()) {
                 PTKidsBITRobot.motorGo(moveSpeed(), moveSpeed())
                 if (control.millis() - t > 1000) break   // missed it: turn from here rather than run away
             }
+            if (stopRequested) return false
             if (smoothTurn) roll(sideFwdMs)
             else { PTKidsBITRobot.motorStop(); nudge(sideFwdMs) }
         } else if (smoothTurn) roll(turnFwdMs)
@@ -315,7 +336,7 @@ namespace PTKidsMission {
             readSensors()
             if (isWide() && control.millis() - t >= ignoreMs) { PTKidsBITRobot.motorStop(); return true }
             PTKidsBITRobot.motorGo(-runMin, -runMin)
-            if (control.millis() - t > 3000) return false
+            if (stopRequested || control.millis() - t > 3000) return false
         }
     }
 
@@ -334,12 +355,12 @@ namespace PTKidsMission {
             // crossing from the box square's edge). Short cap: never far enough to reach the next crossing.
             const t0 = control.millis()
             const cap = Math.max(0, boxMsFor(curNode)) * moveSpeed() / v * 1.5 + 250
-            while (!sideOnLine()) {
+            while (!sideOnLine() && !pollStop()) {
                 PTKidsBITRobot.motorGo(-v, -v)
                 if (control.millis() - t0 > cap) break
             }
             PTKidsBITRobot.motorStop()
-            return true
+            return !stopRequested
         }
         // already on the crossing (small Box time): stay. Reversing from here would reach the NEXT crossing.
         readSensors()
@@ -355,10 +376,11 @@ namespace PTKidsMission {
             if (on >= 1 && on <= 3) lineReads++
             else if (on >= 4 && lineReads >= 2) break        // 4+ sensors after the stub line: the crossing
             PTKidsBITRobot.motorGo(-v, -v)
+            if (stopRequested) break
             if (control.millis() - t > limit) break          // not found: turn from here
         }
         PTKidsBITRobot.motorStop()
-        return true
+        return !stopRequested
     }
 
     /**
@@ -392,7 +414,7 @@ namespace PTKidsMission {
                 else if (pd < -cap) pd = -cap
                 PTKidsBITRobot.motorGo(-v - pd, -v + pd)
             } else PTKidsBITRobot.motorGo(-v, -v)
-            if (control.millis() - t > 4000) return false
+            if (stopRequested || control.millis() - t > 4000) return false
         }
     }
 
@@ -413,7 +435,7 @@ namespace PTKidsMission {
             else if (seenWide) return true
             else if (on >= 1 && control.millis() - t > 300) return true // already on the line
             PTKidsBITRobot.motorGo(runMin, runMin)
-            if (control.millis() - t > 2000) return false
+            if (stopRequested || control.millis() - t > 2000) return false
         }
     }
 
@@ -482,7 +504,7 @@ namespace PTKidsMission {
                     pdStepAt(base, Math.max(runMax, base))
                 }
             }
-            if (control.millis() - t > FOLLOW_TIMEOUT) return false
+            if (stopRequested || control.millis() - t > FOLLOW_TIMEOUT) return false
         }
         let ms = arriveBoxMs
         if (kd == MissionNav.K_ZONE) ms = goalNode == MissionNav.S ? arriveStartMs : arriveZoneMs
@@ -563,7 +585,7 @@ namespace PTKidsMission {
             }
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone(sideTurn && sideCalibrated() && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) : backToCrossing(uturnBackMs)
-            if (!ok) { pendingArm = false; return false }
+            if (!ok || stopRequested) { pendingArm = false; return false }
             if (i == armAt) {
                 // on the crossing just before the colour zone: lower the box during the turn into it
                 if (i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) pendingArm = true
@@ -602,10 +624,20 @@ namespace PTKidsMission {
         const acts = MissionNav.plan(curNode, curHeading, goal)
         if (acts.length == 0) return curNode == goal
         goalNode = goal
-        if (run(acts)) {
+        if (!missionRunning) { stopRequested = false; swallowUndo = false }
+        moving = true
+        const ok = run(acts)
+        moving = false
+        if (ok) {
             curNode = goal
             curHeading = MissionNav.finalHeading()
             return true
+        }
+        if (stopRequested) {
+            PTKidsBITRobot.motorStop()
+            basic.showIcon(IconNames.Square)
+            music.playTone(523, 150)
+            return false
         }
         fail()
         return false
@@ -1062,7 +1094,14 @@ namespace PTKidsMission {
     //% block="เริ่มภารกิจอัตโนมัติ"
     //% group="ภารกิจอัตโนมัติ" weight=90
     export function startAutoMission(): void {
-        if (Calibrating) return
+        if (Calibrating || missionRunning) return
+        missionRunning = true; stopRequested = false; swallowUndo = false
+        autoMission()
+        missionRunning = false
+        PTKidsBITRobot.motorStop()
+    }
+
+    function autoMission(): void {
         if (!colorsReady()) {
             basic.showIcon(IconNames.No)
             music.playTone(262, 300)
@@ -1225,7 +1264,14 @@ namespace PTKidsMission {
     //% block="เริ่ม / ทำต่อ ภารกิจที่เขียนเอง"
     //% group="เขียนเส้นทางเอง" weight=97
     export function runTrips(): void {
-        if (Calibrating) return
+        if (Calibrating || missionRunning) return
+        missionRunning = true; stopRequested = false; swallowUndo = false
+        tripsRun()
+        missionRunning = false
+        PTKidsBITRobot.motorStop()
+    }
+
+    function tripsRun(): void {
         const n = tripBox.length
         if (n == 0) {
             basic.showIcon(IconNames.No)
@@ -1279,6 +1325,53 @@ namespace PTKidsMission {
     //% group="เขียนเส้นทางเอง" weight=94
     export function tripsFinished(): boolean {
         return tripBox.length > 0 && tripsDoneCount > tripBox.length
+    }
+
+    /**
+     * ถอยการนับกลับ 1 เที่ยว: ใช้ตอนหุ่นหยุดแล้ว เมื่อเที่ยวล่าสุดวางกล่องไม่สำเร็จจริง (หุ่นคิดว่าสำเร็จ)
+     * กด "ทำต่อ" แล้วหุ่นจะทำเที่ยวนั้นใหม่ · การกด A ที่ใช้หยุดหุ่นจะไม่ถูกนับเป็นการถอย
+     */
+    //% block="ถอยการนับกลับ 1 เที่ยว"
+    //% group="เขียนเส้นทางเอง" weight=93
+    export function undoTrip(): void {
+        if (missionRunning || moving) return
+        if (swallowUndo) {
+            swallowUndo = false
+            if (control.millis() - stopAt < 3000) return
+        }
+        tripsDoneCount = Math.max(0, Math.min(tripsDoneCount, tripBox.length) - 1)
+    }
+
+    /** หยุดหุ่นทันที (ใช้กับปุ่มอื่นได้ เช่น โลโก้) · ปกติปุ่ม A หยุดหุ่นขณะวิ่งให้อยู่แล้ว */
+    //% block="หยุดภารกิจทันที"
+    //% group="หยุด / ทำต่อ" weight=90
+    export function stopMission(): void {
+        if (moving || missionRunning) {
+            stopRequested = true
+            PTKidsBITRobot.motorStop()
+        }
+    }
+
+    /** จริง ขณะหุ่นกำลังวิ่งหรือทำภารกิจอยู่ */
+    //% block="หุ่นกำลังทำภารกิจ"
+    //% group="หยุด / ทำต่อ" weight=89
+    export function isRunning(): boolean {
+        return moving || missionRunning
+    }
+
+    /** เปิด/ปิด การกดปุ่ม A เพื่อหยุดหุ่นขณะวิ่ง (เปิดไว้ตั้งแต่เริ่ม) */
+    //% block="ปุ่ม A หยุดหุ่นขณะวิ่ง $on"
+    //% on.defl=true
+    //% group="หยุด / ทำต่อ" weight=88
+    export function setStopButtonA(on: boolean): void {
+        stopButtonA = on
+    }
+
+    //% blockHidden=true
+    export function pressStopForTest(): void {
+        stopRequested = true
+        swallowUndo = true
+        stopAt = control.millis()
     }
 
     /**
