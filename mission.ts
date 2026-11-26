@@ -12,7 +12,7 @@ enum BoxColor {
  * and its calibration arrays (Color_Line_All / Color_Background_All).
  */
 //% color="#E67E22" icon="" block="ภารกิจส่งด่วน" weight=95
-//% groups='["ภารกิจอัตโนมัติ", "นำทาง", "ตั้งค่า"]'
+//% groups='["ภารกิจอัตโนมัติ", "เขียนเส้นทางเอง", "นำทาง", "ตั้งค่า"]'
 namespace PTKidsMission {
     // ---- where the robot thinks it is ----
     let curNode = MissionNav.S
@@ -65,6 +65,7 @@ namespace PTKidsMission {
     let smoothTurn = true          // turns without stopping on the crossing or after the spin
     let pendingArm = false          // lower the arm during the next spin (turn into a colour zone)
     let lowerArmBeforeZone = true   // lower the arm on the crossing before the white/black zone
+    let lowerArmBeforeBox = false   // lower the arm (and open) at the start of the approach into a box
 
     const FOLLOW_TIMEOUT = 8000
     const SPIN_TIMEOUT = 3000
@@ -551,7 +552,15 @@ namespace PTKidsMission {
             else if (op == MissionNav.OP_EXIT) ok = exitZone()
             else if (op == MissionNav.OP_FOLLOW) ok = follow(arg, lens, !(smoothTurn && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN), moveSpeed())
             else if (op == MissionNav.OP_TURN) ok = turn(arg)
-            else if (op == MissionNav.OP_ARRIVE) ok = arrive(arg, lens)
+            else if (op == MissionNav.OP_ARRIVE) {
+                if (lowerArmBeforeBox && (arg % 10 == MissionNav.K_BOX || arg % 10 == MissionNav.K_YELLOW)) {
+                    // arm down for the last stretch only: the robot is still a crossing away from the box
+                    servoNow(gripServo, gripOpen)
+                    servoNow(armServo, armDown)
+                    if (Math.idiv(arg, 10) == 0) basic.pause(150)   // already next to the box: let the arm come down
+                }
+                ok = arrive(arg, lens)
+            }
             else if (op == MissionNav.OP_BACK && arg != MissionNav.K_ZONE && boxStopAtCrossing && MissionNav.kind(curNode) == MissionNav.K_BOX) ok = backOntoBoxCrossing()
             else if (op == MissionNav.OP_BACK) ok = arg == MissionNav.K_ZONE ? backOutOfZone(sideTurn && sideCalibrated() && i + 2 < acts.length && acts[i + 2] == MissionNav.OP_TURN) : backToCrossing(uturnBackMs)
             if (!ok) { pendingArm = false; return false }
@@ -766,6 +775,7 @@ namespace PTKidsMission {
         lastArm = -1; lastGrip = -1
         gripHoldMs = 100; gripReleaseMs = 50
         smoothTurn = true; boxStopAtCrossing = true; lowerArmBeforeZone = true; showStopReason = false
+        lowerArmBeforeBox = false
     }
 
     //% blockHidden=true
@@ -1123,6 +1133,70 @@ namespace PTKidsMission {
     //% group="ภารกิจอัตโนมัติ" weight=8
     export function setLowerArmBeforeZone(on: boolean): void {
         lowerArmBeforeZone = on
+    }
+
+    // ================= เขียนเส้นทางเอง (manual routes, same behaviour as the auto mission) =================
+
+    /**
+     * บอกหุ่นว่ากล่องทั้ง 8 จุดวางอยู่บนสนาม (ใส่ตอนเริ่มรอบ)
+     * หุ่นจะเลี่ยงการเลี้ยวข้างกล่องที่ยังไม่เก็บ เหมือนภารกิจอัตโนมัติ · "หยิบกล่อง" จะจำเองว่ากล่องนั้นเก็บแล้ว
+     */
+    //% block="ตั้งกล่องบนสนามครบ 8 กล่อง"
+    //% group="เขียนเส้นทางเอง" weight=100
+    export function setAllBoxesOnField(): void {
+        MissionNav.setPresentMask(255)
+    }
+
+    /**
+     * เตรียมหนีบ: อ้ามือและยกแขนขึ้น (ใส่ก่อนออกไปหากล่อง วิ่งปกติแขนยกไว้)
+     */
+    //% block="เตรียมหนีบ (อ้ามือ ยกแขน)"
+    //% group="เขียนเส้นทางเอง" weight=90
+    export function prepareGrip(): void {
+        servoNow(gripServo, gripOpen)
+        servoNow(armServo, armUp)
+    }
+
+    /**
+     * หยิบกล่อง: ลดแขน (ถ้ายังไม่ลง) หนีบ รอตามเวลาหนีบ แล้วยกแขน · หุ่นจำว่ากล่องจุดนี้ถูกเก็บแล้ว
+     */
+    //% block="หยิบกล่อง"
+    //% group="เขียนเส้นทางเอง" weight=80
+    export function pickBox(): void {
+        if (lastArm != armDown) {
+            servoNow(armServo, armDown)
+            basic.pause(SERVO_MS)
+        }
+        servoNow(gripServo, gripClose)
+        basic.pause(gripHoldMs)
+        servoNow(armServo, armUp)
+        const i = curNode - MissionNav.UL
+        if (MissionNav.kind(curNode) == MissionNav.K_BOX && i >= 0 && i < 8) MissionNav.setPresentMask(MissionNav.getPresentMask() & ~(1 << i))
+    }
+
+    /**
+     * วางกล่อง: ลดแขน (ปกติลงไว้แล้วตั้งแต่ก่อนเข้าช่อง) อ้ามือ รอตามเวลาปล่อย แล้วยกแขน
+     */
+    //% block="วางกล่อง"
+    //% group="เขียนเส้นทางเอง" weight=70
+    export function dropBox(): void {
+        if (lastArm != armDown) {
+            servoNow(armServo, armDown)
+            basic.pause(SERVO_MS)
+        }
+        servoNow(gripServo, gripOpen)
+        basic.pause(gripReleaseMs)
+        servoNow(armServo, armUp)
+    }
+
+    /**
+     * ลดแขนและอ้ามือตอนเริ่มช่วงสุดท้ายก่อนถึงกล่อง รวมกล่องเหลือง (วิ่งปกติแขนยกไว้) · ใช้กับ "ไปที่" กล่อง
+     */
+    //% block="ลดแขนก่อนถึงกล่อง $on"
+    //% on.defl=true
+    //% group="เขียนเส้นทางเอง" weight=60
+    export function setLowerArmBeforeBox(on: boolean): void {
+        lowerArmBeforeBox = on
     }
 
     //% blockHidden=true
