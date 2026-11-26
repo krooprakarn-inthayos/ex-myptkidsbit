@@ -1189,6 +1189,98 @@ namespace PTKidsMission {
         servoNow(armServo, armUp)
     }
 
+    // ---- trip list: the order the kids write, run like the auto mission (stop on a miss, RETRY resumes) ----
+    let tripBox: number[] = []     // box node per trip, in the written order
+    let tripWhite: boolean[] = []  // true = to the white zone
+    let tripsDoneCount = 0         // trips delivered; = length + 1 once the yellow box is back at START
+
+    /** ล้างรายการเที่ยวทั้งหมด (ใส่ก่อน "เพิ่มเที่ยว") */
+    //% block="ล้างรายการเที่ยว"
+    //% group="เขียนเส้นทางเอง" weight=99
+    export function clearTrips(): void {
+        tripBox = []
+        tripWhite = []
+        tripsDoneCount = 0
+    }
+
+    /**
+     * เพิ่มหนึ่งเที่ยวต่อท้ายรายการ: หยิบกล่องที่จุดนี้ แล้วส่งเข้าช่องสีที่เลือก
+     * เขียนตามลำดับที่อยากให้หุ่นทำ · กล่องเหลืองหุ่นทำเองเป็นเที่ยวสุดท้ายเสมอ
+     */
+    //% block="เพิ่มเที่ยว หยิบกล่องที่ $box ส่งไปช่อง $color"
+    //% box.defl=MissionPoint.UL
+    //% group="เขียนเส้นทางเอง" weight=98
+    export function addTrip(box: MissionPoint, color: BoxColor): void {
+        const n = MissionNav.pointNode(box)
+        if (MissionNav.kind(n) != MissionNav.K_BOX) return
+        tripBox.push(n)
+        tripWhite.push(color == BoxColor.White)
+    }
+
+    /**
+     * เริ่มทำเที่ยวตามรายการจาก START: หยิบ → ส่งเข้าช่อง ทีละเที่ยว แล้วคีบกล่องเหลืองกลับ START (ไม่ปล่อย)
+     * เลี่ยงกล่องที่ยังวางอยู่เหมือนภารกิจอัตโนมัติ · ถ้าพลาด หุ่นหยุด → RETRY วางที่ START แล้วเรียกบล็อคนี้อีกครั้ง
+     * หุ่นทำต่อจากเที่ยวที่พลาด (เริ่มเที่ยวนั้นใหม่ตั้งแต่หยิบ)
+     */
+    //% block="เริ่ม / ทำต่อ ภารกิจที่เขียนเอง"
+    //% group="เขียนเส้นทางเอง" weight=97
+    export function runTrips(): void {
+        if (Calibrating) return
+        const n = tripBox.length
+        if (n == 0) {
+            basic.showIcon(IconNames.No)
+            music.playTone(262, 300)
+            return
+        }
+        if (tripsDoneCount > n) return                 // finished: use "เริ่มภารกิจที่เขียนเองใหม่ทั้งหมด" for a new round
+        setPosition(MissionPoint.START)
+        lastArm = -1; lastGrip = -1                     // the servos may have been moved since
+        // boxes still on the field: all but the ones already delivered (a failed trip's box is put back)
+        let mask = 255
+        for (let k = 0; k < tripsDoneCount; k++) mask &= ~(1 << (tripBox[k] - MissionNav.UL))
+        for (let k = tripsDoneCount; k < n; k++) {
+            const bit = 1 << (tripBox[k] - MissionNav.UL)
+            MissionNav.setPresentMask(mask)
+            prepareGrip()
+            if (!drive(tripBox[k])) { MissionNav.setPresentMask(0); return }
+            pickBox()
+            mask &= ~bit
+            MissionNav.setPresentMask(mask)
+            if (!drive(tripWhite[k] ? MissionPoint.WhiteZone : MissionPoint.BlackZone)) { MissionNav.setPresentMask(0); return }
+            dropBox()
+            tripsDoneCount = k + 1
+        }
+        MissionNav.setPresentMask(0)
+        prepareGrip()
+        if (!drive(MissionPoint.Yellow)) return
+        pickBox()
+        if (!drive(MissionPoint.START)) return
+        tripsDoneCount = n + 1                          // done, holding the yellow box in START
+        basic.showIcon(IconNames.Yes)
+        music.playTone(988, 400)
+    }
+
+    /** เริ่มรอบใหม่: นับเที่ยวใหม่จากเที่ยวแรก (รายการเที่ยวยังอยู่) */
+    //% block="เริ่มภารกิจที่เขียนเองใหม่ทั้งหมด"
+    //% group="เขียนเส้นทางเอง" weight=96
+    export function resetTrips(): void {
+        tripsDoneCount = 0
+    }
+
+    /** จำนวนเที่ยวที่ส่งกล่องเสร็จแล้ว (ไม่นับกล่องเหลือง) */
+    //% block="จำนวนเที่ยวที่ทำแล้ว"
+    //% group="เขียนเส้นทางเอง" weight=95
+    export function tripsDone(): number {
+        return Math.min(tripsDoneCount, tripBox.length)
+    }
+
+    /** จริง เมื่อทำครบทุกเที่ยวและคีบกล่องเหลืองกลับถึง START แล้ว */
+    //% block="ภารกิจที่เขียนเองเสร็จแล้ว"
+    //% group="เขียนเส้นทางเอง" weight=94
+    export function tripsFinished(): boolean {
+        return tripBox.length > 0 && tripsDoneCount > tripBox.length
+    }
+
     /**
      * ลดแขนและอ้ามือตอนเริ่มช่วงสุดท้ายก่อนถึงกล่อง รวมกล่องเหลือง (วิ่งปกติแขนยกไว้) · ใช้กับ "ไปที่" กล่อง
      */
